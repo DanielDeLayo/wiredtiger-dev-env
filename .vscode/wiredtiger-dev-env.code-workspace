@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "wiredtiger-dev-env",
+			"path": ".."
+		},
+		{
+			"name": "wiredtiger",
+			"path": "../../wiredtiger"
+		},
+		{
+			"name": "Increment-and-Freeze",
+			"path": "../../Increment-and-Freeze"
+		}
+	],
+	"settings": {}
+}

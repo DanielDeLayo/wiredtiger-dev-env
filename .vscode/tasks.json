@@ -1,0 +1,76 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Wiredtiger",
+            "type": "shell",
+            // Assign output file name with VSCode inner variables like ${fileBasename}
+            "command": "ninja",
+            "options": {
+              "cwd": "${workspaceFolder:wiredtiger}/build"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "CMake Wiredtiger",
+            "type": "shell",
+            // Assign output file name with VSCode inner variables like ${fileBasename}
+            //"command": "cmake -DCMAKE_BUILD_TYPE=Debug ../.",
+            "command": "cmake -G Ninja -DHAVE_ANALYZE_CACHE=1 -DENABLE_STATIC=1 ../.",
+            "options": {
+              "cwd": "${workspaceFolder:wiredtiger}/build"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Run ctest",
+            "type": "shell",
+            // Assign output file name with VSCode inner variables like ${fileBasename}
+            "command": "ctest -j4",
+            "options": {
+              "cwd": "${workspaceFolder:wiredtiger}/build"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Run python tests",
+            "type": "shell",
+            // Assign output file name with VSCode inner variables like ${fileBasename}
+            "command": "python3 ../test/suite/run.py -j 4 -v 2 checkpoint",
+            "options": {
+              "cwd": "${workspaceFolder:wiredtiger}/build"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "Run WT_TEST tests",
+            "type": "shell",
+            // Assign output file name with VSCode inner variables like ${fileBasename}
+            "command": "build/bench/wtperf/wtperf -O bench/wtperf/runners/ycsb-a.wtperf",
+            "options": {
+              "cwd": "${workspaceFolder:wiredtiger}"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        }
+    ]
+}
