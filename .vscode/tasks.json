@@ -20,7 +20,7 @@
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
             //"command": "cmake -DCMAKE_BUILD_TYPE=Debug ../.",
-            "command": "cmake -G Ninja -DHAVE_ANALYZE_CACHE=1 -DENABLE_STATIC=1 ../.",
+            "command": "cmake -G Ninja -DHAVE_ANALYZE_CACHE=1 -DENABLE_STATIC=1 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ../. && mv compile_commands.json ..",
             "options": {
               "cwd": "${workspaceFolder:wiredtiger}/build"
             },
