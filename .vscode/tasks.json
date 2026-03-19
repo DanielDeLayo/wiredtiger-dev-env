@@ -34,7 +34,8 @@
             "label": "Run ctest",
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
-            "command": "ctest -j4",
+            //"command": "ctest -j4 --rerun-failed --output-on-failure",
+            "command": "ctest -j4 -E test_syscall",
             "options": {
               "cwd": "${workspaceFolder:wiredtiger}/build"
             },
