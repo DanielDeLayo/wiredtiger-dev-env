@@ -55,7 +55,7 @@
             "problemMatcher": ["$gcc"],
             "group": {
                 "kind": "test",
-                "isDefault": false
+                "isDefault": true
             }
         },
         {
