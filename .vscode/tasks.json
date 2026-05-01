@@ -20,7 +20,7 @@
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
             //"command": "cmake -DCMAKE_BUILD_TYPE=Debug ../.",
-            "command": "cmake -G Ninja -DHAVE_ANALYZE_CACHE=1 -DENABLE_STATIC=1 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ../. && mv compile_commands.json ..",
+            "command": "cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHAVE_ANALYZE_CACHE=1 -DENABLE_STATIC=1 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ../. && mv compile_commands.json ..",
             "options": {
               "cwd": "${workspaceFolder:wiredtiger}/build"
             },
@@ -35,7 +35,36 @@
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
             //"command": "ctest -j4 --rerun-failed --output-on-failure",
-            "command": "ctest -j4 -E test_syscall",
+            "command": "ctest -j4 -E test_syscall -E ex_tiered",
+            "options": {
+              "cwd": "${workspaceFolder:wiredtiger}/build"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Run small ctests",
+            "type": "shell",
+            // Assign output file name with VSCode inner variables like ${fileBasename}
+            //"command": "ctest -j4 --rerun-failed --output-on-failure",
+            "command": "ctest -j 1 -I 1,10,1 --output-on-failure",
+            "options": {
+              "cwd": "${workspaceFolder:wiredtiger}/build"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Run failed ctests",
+            "type": "shell",
+            // Assign output file name with VSCode inner variables like ${fileBasename}
+            "command": "ctest -j1 --rerun-failed --output-on-failure",
             "options": {
               "cwd": "${workspaceFolder:wiredtiger}/build"
             },

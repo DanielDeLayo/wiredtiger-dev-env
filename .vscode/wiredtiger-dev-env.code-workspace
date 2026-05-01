@@ -13,5 +13,10 @@
 			"path": "../../Increment-and-Freeze"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"cSpell.words": [
+			"wiredtiger"
+		],
+		"C_Cpp.refactoring.includeHeader": "never"
+	}
 }
