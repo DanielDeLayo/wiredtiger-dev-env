@@ -35,7 +35,7 @@
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
             //"command": "ctest -j4 --rerun-failed --output-on-failure",
-            "command": "ctest -j1 -E 'test_syscall|ex_tiered|disagg'",
+            "command": "ctest -j1 -E 'test_syscall|ex_tiered|disagg|wt7989'",
             "options": {
               "cwd": "${workspaceFolder:wiredtiger}/build"
             },
@@ -64,7 +64,7 @@
             "label": "Run failed ctests",
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
-            "command": "ctest -j1 -E 'test_syscall|ex_tiered|disagg' --rerun-failed --output-on-failure",
+            "command": "ctest -j1 -E 'test_syscall|ex_tiered|disagg|wt7989' --rerun-failed --output-on-failure",
             "options": {
               "cwd": "${workspaceFolder:wiredtiger}/build"
             },
