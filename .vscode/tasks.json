@@ -92,9 +92,9 @@
             "label": "Run WT_TEST tests",
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
-            "command": "build/bench/wtperf/wtperf -O bench/wtperf/runners/ycsb-a.wtperf",
+            "command": "../bench/wtperf/wtperf -O ../../bench/wtperf/runners/evict-btree-1.wtperf",
             "options": {
-              "cwd": "${workspaceFolder:wiredtiger}"
+              "cwd": "${workspaceFolder:wiredtiger}/build/Testing/"
             },
             "problemMatcher": ["$gcc"],
             "group": {
