@@ -20,7 +20,8 @@
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
             //"command": "cmake -DCMAKE_BUILD_TYPE=Debug ../.",
-            "command": "cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DHAVE_ANALYZE_CACHE=1 -DENABLE_STATIC=1 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ../. && mv compile_commands.json ..",
+            //-DCMAKE_CXX_FLAGS='-fsanitize=address' -DCMAKE_C_FLAGS='-fsanitize=address'
+            "command": "cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo  -DHAVE_ANALYZE_CACHE=1 -DENABLE_STATIC=1 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ../. && mv compile_commands.json ..",
             "options": {
               "cwd": "${workspaceFolder:wiredtiger}/build"
             },
@@ -92,7 +93,8 @@
             "label": "Run WT_TEST tests",
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
-            "command": "../bench/wtperf/wtperf -O ../../bench/wtperf/runners/evict-btree-1.wtperf",
+            "command": "../bench/wtperf/wtperf -O ../../bench/wtperf/runners/medium-btree-large.wtperf",
+            //"command": "../bench/wtperf/wtperf -O ../../bench/wtperf/runners/500m-btree-50r50u.wtperf",
             "options": {
               "cwd": "${workspaceFolder:wiredtiger}/build/Testing/"
             },
