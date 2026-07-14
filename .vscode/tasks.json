@@ -5,13 +5,40 @@
             "label": "Build Wiredtiger",
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
-            "command": "ninja",
+            "command": "ninja -j 4",
             "options": {
               "cwd": "${workspaceFolder:wiredtiger}/build"
             },
             "problemMatcher": ["$gcc"],
             "group": {
                 "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Build Mongo",
+            "type": "shell",
+            // Assign output file name with VSCode inner variables like ${fileBasename}
+            "command": "bazel build install-mongod --verbose_failures",
+            "options": {
+              "cwd": "${workspaceFolder:mongodb}/"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Run Mongo Test",
+            "type": "shell",
+            "command": "bazel test ${input:mongoTestTarget} --verbose_failures",
+            "options": {
+              "cwd": "${workspaceFolder:mongodb}/"
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "test",
                 "isDefault": true
             }
         },
@@ -103,6 +130,14 @@
                 "kind": "test",
                 "isDefault": true
             }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "mongoTestTarget",
+            "type": "promptString",
+            "description": "Enter the Mongo test target to run",
+            "default": "//src/mongo/db:startup_check_rseq_test"
         }
     ]
 }
