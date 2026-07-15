@@ -7,9 +7,11 @@
             // Assign output file name with VSCode inner variables like ${fileBasename}
             "command": "ninja -j 4",
             "options": {
-              "cwd": "${workspaceFolder:wiredtiger}/build"
+                "cwd": "${workspaceFolder:wiredtiger}/build"
             },
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -21,22 +23,41 @@
             // Assign output file name with VSCode inner variables like ${fileBasename}
             "command": "bazel build install-mongod --verbose_failures",
             "options": {
-              "cwd": "${workspaceFolder:mongodb}/"
+                "cwd": "${workspaceFolder:mongodb}/"
             },
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true
             }
         },
         {
-            "label": "Run Mongo Test",
+            "label": "Run Mongo Integration Test",
             "type": "shell",
-            "command": "bazel test ${input:mongoTestTarget} --verbose_failures",
+            "command": "bazel test --test_tag_filters=mongo_integration_test //src/mongo/...",
             "options": {
-              "cwd": "${workspaceFolder:mongodb}/"
+                "cwd": "${workspaceFolder:mongodb}/"
             },
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Run Mongo Unit Test",
+            "type": "shell",
+            "command": "bazel test --test_tag_filters=mongo_unittest //src/mongo/...",
+            "options": {
+                "cwd": "${workspaceFolder:mongodb}/"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "test",
                 "isDefault": true
@@ -50,9 +71,11 @@
             //-DCMAKE_CXX_FLAGS='-fsanitize=address' -DCMAKE_C_FLAGS='-fsanitize=address'
             "command": "cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo  -DHAVE_ANALYZE_CACHE=1 -DENABLE_STATIC=1 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ../. && mv compile_commands.json ..",
             "options": {
-              "cwd": "${workspaceFolder:wiredtiger}/build"
+                "cwd": "${workspaceFolder:wiredtiger}/build"
             },
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -65,9 +88,11 @@
             //"command": "ctest -j4 --rerun-failed --output-on-failure",
             "command": "ctest -j1 -E 'test_syscall|ex_tiered|disagg|wt7989'",
             "options": {
-              "cwd": "${workspaceFolder:wiredtiger}/build"
+                "cwd": "${workspaceFolder:wiredtiger}/build"
             },
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "test",
                 "isDefault": true
@@ -80,9 +105,11 @@
             //"command": "ctest -j4 --rerun-failed --output-on-failure",
             "command": "ctest -j 1 -I 1,10,1 --output-on-failure",
             "options": {
-              "cwd": "${workspaceFolder:wiredtiger}/build"
+                "cwd": "${workspaceFolder:wiredtiger}/build"
             },
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "test",
                 "isDefault": true
@@ -94,9 +121,11 @@
             // Assign output file name with VSCode inner variables like ${fileBasename}
             "command": "ctest -j1 -E 'test_syscall|ex_tiered|disagg|wt7989' --rerun-failed --output-on-failure",
             "options": {
-              "cwd": "${workspaceFolder:wiredtiger}/build"
+                "cwd": "${workspaceFolder:wiredtiger}/build"
             },
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "test",
                 "isDefault": true
@@ -108,9 +137,11 @@
             // Assign output file name with VSCode inner variables like ${fileBasename}
             "command": "python3 ../test/suite/run.py -j 4 -v 2 checkpoint",
             "options": {
-              "cwd": "${workspaceFolder:wiredtiger}/build"
+                "cwd": "${workspaceFolder:wiredtiger}/build"
             },
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "test",
                 "isDefault": true
@@ -123,21 +154,15 @@
             "command": "../bench/wtperf/wtperf -O ../../bench/wtperf/runners/medium-btree-large.wtperf",
             //"command": "../bench/wtperf/wtperf -O ../../bench/wtperf/runners/500m-btree-50r50u.wtperf",
             "options": {
-              "cwd": "${workspaceFolder:wiredtiger}/build/Testing/"
+                "cwd": "${workspaceFolder:wiredtiger}/build/Testing/"
             },
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "test",
                 "isDefault": true
             }
-        }
-    ],
-    "inputs": [
-        {
-            "id": "mongoTestTarget",
-            "type": "promptString",
-            "description": "Enter the Mongo test target to run",
-            "default": "//src/mongo/db:startup_check_rseq_test"
         }
     ]
 }
