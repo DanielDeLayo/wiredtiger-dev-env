@@ -21,7 +21,7 @@
             "label": "Build Mongo",
             "type": "shell",
             // Assign output file name with VSCode inner variables like ${fileBasename}
-            "command": "bazel build install-devcore --verbose_failures",
+            "command": "bazel build install-devcore --verbose_failures --build_enterprise=False",
             "options": {
                 "cwd": "${workspaceFolder:mongodb}/"
             },
@@ -36,7 +36,7 @@
         {
             "label": "Run Mongo Integration Test",
             "type": "shell",
-            "command": "bash -c \"bazel build //src/mongo/executor:executor_integration_test && source python3-venv/bin/activate && printf 'test_kind: cpp_integration_test\\n\\nselector:\\n  roots:\\n    - bazel-bin/src/mongo/executor/executor_integration_test\\n\\nexecutor:\\n  archive:\\n    hooks:\\n      - ValidateCollections\\n  config:\\n    program_options: {}\\n  hooks:\\n    - class: ValidateCollections\\n  fixture:\\n    class: MongoDFixture\\n    mongod_options:\\n      set_parameters:\\n        enableTestCommands: 1\\n' > buildscripts/resmokeconfig/suites/executor_suite.yml && ./buildscripts/resmoke.py run --suites=executor_suite --dbpathPrefix=${workspaceFolder:mongodb}/.tmp/db bazel-bin/src/mongo/executor/executor_integration_test\"",
+            "command": "bash -c \"bazel build //src/mongo/executor:executor_integration_test --build_enterprise=False && source python3-venv/bin/activate && printf 'test_kind: cpp_integration_test\\n\\nselector:\\n  roots:\\n    - bazel-bin/src/mongo/executor/executor_integration_test\\n\\nexecutor:\\n  archive:\\n    hooks:\\n      - ValidateCollections\\n  config:\\n    program_options: {}\\n  hooks:\\n    - class: ValidateCollections\\n  fixture:\\n    class: MongoDFixture\\n    mongod_options:\\n      set_parameters:\\n        enableTestCommands: 1\\n' > buildscripts/resmokeconfig/suites/executor_suite.yml && ./buildscripts/resmoke.py run --suites=executor_suite --dbpathPrefix=${workspaceFolder:mongodb}/.tmp/db bazel-bin/src/mongo/executor/executor_integration_test\"",
             "options": {
                 "cwd": "${workspaceFolder:mongodb}/"
             },

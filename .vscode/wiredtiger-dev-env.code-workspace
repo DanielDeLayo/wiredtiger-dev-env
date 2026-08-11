@@ -1,12 +1,12 @@
 {
 	"folders": [
 		{
-			"name": "mongodb",
-			"path": "../../mongo"
-		},
-		{
 			"name": "wiredtiger-dev-env",
 			"path": ".."
+		},
+		{
+			"name": "mongodb",
+			"path": "../../mongo"
 		},
 		{
 			"name": "wiredtiger",
