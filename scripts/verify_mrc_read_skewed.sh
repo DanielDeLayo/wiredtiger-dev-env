@@ -5,10 +5,10 @@ WORKSPACE_DIR="/Users/danieldelayo/Gits/wiredtiger-dev-env"
 WT_DIR="/Users/danieldelayo/Gits/wiredtiger"
 WTPERF_CMD="$WT_DIR/build/bench/wtperf/wtperf"
 WTPERF_CONFIG="$WT_DIR/bench/wtperf/runners/ycsb-100read.wtperf"
-RESULTS_DIR="$WT_DIR/build/verify_results"
+RESULTS_DIR="$WT_DIR/build/verify_results_skewed"
 
 CACHE_SIZES=("10M" "25M" "50M" "75M" "100M" "150M")
-RUN_OPS=2000000
+RUN_TIME=20
 ICOUNT=100000
 
 mkdir -p "$RESULTS_DIR"
@@ -20,15 +20,15 @@ rm -f "$RESULTS_DIR/"*.hist
 # Run for different cache sizes
 for size in "${CACHE_SIZES[@]}"; do
     echo "======================================"
-    echo "Running wtperf with cache size: $size (fixed length: $RUN_OPS ops)"
+    echo "Running wtperf with cache size: $size"
     echo "======================================"
 
     # We clear WT_TEST to ensure fresh stats
-    rm -rf WT_TEST
-    mkdir WT_TEST
+    rm -rf WT_TEST_SKEWED
+    mkdir WT_TEST_SKEWED
     
     # Run wtperf and capture output to extract the printed IAF CSV
-    $WTPERF_CMD -O "$WTPERF_CONFIG" -o conn_config="\"cache_size=$size,log=(enabled=false)\"" -o pareto=0 -o threads="((count=4,reads=1))" -o populate_threads=1 -o run_ops=$RUN_OPS -o run_time=0 -o icount=$ICOUNT -o warmup=0 > wtperf_out.log 2>&1 || true
+    $WTPERF_CMD -h WT_TEST_SKEWED -O "$WTPERF_CONFIG" -o conn_config="\"cache_size=$size,log=(enabled=false)\"" -o pareto=5 -o threads="((count=4,reads=1))" -o populate_threads=1 -o run_ops=2000000 -o run_time=60 -o icount=$ICOUNT -o warmup=0 > wtperf_out_skewed.log 2>&1 || true
 
     # Extract the CSV from wtperf_out.log
     # The CSV starts with a line containing 3 comma-separated numbers (e.g. 14887219,930,14887219)
@@ -38,7 +38,7 @@ for size in "${CACHE_SIZES[@]}"; do
 import sys
 import re
 
-log_file = "wtperf_out.log"
+log_file = "wtperf_out_skewed.log"
 out_file = "'"$RESULTS_DIR"'/iaf_'"$size"'.hist"
 
 last_csv = []
@@ -84,7 +84,7 @@ except Exception as e:
 '
 
     # Extract cache misses from WiredTiger statistics
-    STAT_FILE=$(ls -t WT_TEST/WiredTigerStat.* 2>/dev/null | head -n 1)
+    STAT_FILE=$(ls -t WT_TEST_SKEWED/WiredTigerStat.* 2>/dev/null | head -n 1)
     if [ -n "$STAT_FILE" ]; then
         LAST_STAT=$(tail -n 1 "$STAT_FILE")
         
