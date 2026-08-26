@@ -13,7 +13,13 @@ else
 fi
 
 DISTRIBUTION=${1:-zipfian}
-RESULTS_DIR="$DEV_ENV_DIR/data/verify_results_mongo_$DISTRIBUTION"
+WRITE_RATIO=${2:-0.0}
+
+if [ "$WRITE_RATIO" != "0.0" ] && [ "$WRITE_RATIO" != "0" ]; then
+    RESULTS_DIR="$DEV_ENV_DIR/data/verify_results_mongo_${DISTRIBUTION}_write${WRITE_RATIO}"
+else
+    RESULTS_DIR="$DEV_ENV_DIR/data/verify_results_mongo_$DISTRIBUTION"
+fi
 SEED_DIR="$DEV_ENV_DIR/data/mongo_data_seed"
 
 CACHE_SIZES=("1M" "2M" "3M" "4M" "5M" "6M" "7M" "8M" "9M" "10M")
@@ -81,8 +87,8 @@ for size in "${CACHE_SIZES[@]}"; do
     echo "Waiting for mongod to start..."
     sleep 3
 
-    echo "Running fixed-count workload ($DISTRIBUTION, $OPERATION_COUNT ops)..."
-    $DEV_ENV_DIR/venv/bin/python3 $DEV_ENV_DIR/scripts/mongo_workload.py --action run --operations $OPERATION_COUNT --distribution $DISTRIBUTION --records $RECORD_COUNT --threads 8 > run.log 2>&1
+    echo "Running fixed-count workload ($DISTRIBUTION, $OPERATION_COUNT ops, write_ratio: $WRITE_RATIO)..."
+    $DEV_ENV_DIR/venv/bin/python3 $DEV_ENV_DIR/scripts/mongo_workload.py --action run --operations $OPERATION_COUNT --distribution $DISTRIBUTION --write-ratio $WRITE_RATIO --records $RECORD_COUNT --threads 8 > run.log 2>&1
 
     echo "Shutting down mongod to flush IAF trace..."
     kill -2 $MONGOD_PID || true

@@ -23,7 +23,7 @@ def worker_load(worker_id, num_workers, total_docs, batch_size, host, port):
         coll.insert_many(docs, ordered=False)
     client.close()
 
-def worker_read(ops_count, total_docs, distribution, host, port, queue):
+def worker_workload(ops_count, total_docs, distribution, write_ratio, host, port, queue):
     client = MongoClient(host, port)
     coll = client['ycsb']['usertable']
     
@@ -33,9 +33,19 @@ def worker_read(ops_count, total_docs, distribution, host, port, queue):
     else:
         keys = np.random.randint(0, total_docs, size=ops_count)
         
+    if write_ratio > 0.0:
+        is_write = np.random.random(size=ops_count) < write_ratio
+    else:
+        is_write = np.zeros(ops_count, dtype=bool)
+        
+    payload = "u" * 100
     start = time.time()
-    for k in keys:
-        coll.find_one({"_id": int(k)})
+    for k, do_write in zip(keys, is_write):
+        doc_id = int(k)
+        if do_write:
+            coll.update_one({"_id": doc_id}, {"$set": {"field0": payload}})
+        else:
+            coll.find_one({"_id": doc_id})
     elapsed = time.time() - start
     queue.put(elapsed)
     client.close()
@@ -46,6 +56,7 @@ def main():
     parser.add_argument('--records', type=int, default=300000)
     parser.add_argument('--operations', type=int, default=300000)
     parser.add_argument('--distribution', choices=['zipfian', 'uniform'], default='zipfian')
+    parser.add_argument('--write-ratio', type=float, default=0.0, help="Ratio of write operations (0.0 to 1.0)")
     parser.add_argument('--threads', type=int, default=8)
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=27017)
@@ -70,7 +81,8 @@ def main():
         print(f"Load complete. Total documents: {coll.count_documents({})}")
         
     elif args.action == 'run':
-        print(f"Executing {args.operations} fixed-count operations ({args.distribution}) across {args.threads} workers...")
+        write_pct = int(args.write_ratio * 100)
+        print(f"Executing {args.operations} fixed-count operations ({args.distribution}, {write_pct}% writes) across {args.threads} workers...")
         ops_per_worker = args.operations // args.threads
         
         queue = mp.Queue()
@@ -78,7 +90,7 @@ def main():
         start = time.time()
         
         for _ in range(args.threads):
-            p = mp.Process(target=worker_read, args=(ops_per_worker, args.records, args.distribution, args.host, args.port, queue))
+            p = mp.Process(target=worker_workload, args=(ops_per_worker, args.records, args.distribution, args.write_ratio, args.host, args.port, queue))
             procs.append(p)
             p.start()
             
