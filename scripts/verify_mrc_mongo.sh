@@ -4,12 +4,17 @@ export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
 
 DEV_ENV_DIR="/Users/danieldelayo/Gits/wiredtiger-dev-env"
 MONGO_DIR="/Users/danieldelayo/Gits/mongo"
-MONGOD_CMD="$MONGO_DIR/bazel-bin/src/mongo/db/mongod"
-YCSB_DIR="$DEV_ENV_DIR/tools/ycsb-0.17.0"
-YCSB_CMD="$YCSB_DIR/bin/ycsb"
+
+# Resolve binaries from bazel install-devcore or bazel-bin
+if [ -f "$MONGO_DIR/bazel-bin/install-devcore/bin/mongod" ]; then
+    MONGOD_CMD="$MONGO_DIR/bazel-bin/install-devcore/bin/mongod"
+else
+    MONGOD_CMD="$MONGO_DIR/bazel-bin/src/mongo/db/mongod"
+fi
 
 DISTRIBUTION=${1:-zipfian}
 RESULTS_DIR="$DEV_ENV_DIR/data/verify_results_mongo_$DISTRIBUTION"
+SEED_DIR="$DEV_ENV_DIR/data/mongo_data_seed"
 
 CACHE_SIZES=("1M" "2M" "3M" "4M" "5M" "6M" "7M" "8M" "9M" "10M")
 RECORD_COUNT=300000
@@ -18,10 +23,46 @@ OPERATION_COUNT=300000
 mkdir -p "$RESULTS_DIR"
 cd "$RESULTS_DIR"
 
-echo "CacheSize,MissRatio" > "$RESULTS_DIR/real_miss_ratios.csv"
-
 # Kill any existing mongod
 killall mongod 2>/dev/null || true
+
+# ---------------------------------------------------------
+# Phase 1: Populate Seed Data (Loaded Once)
+# ---------------------------------------------------------
+if [ ! -d "$SEED_DIR" ] || [ "${RELOAD:-0}" = "1" ]; then
+    echo "======================================"
+    echo "Populating Seed Database ($RECORD_COUNT documents)..."
+    echo "======================================"
+    rm -rf "$SEED_DIR"
+    mkdir -p "$SEED_DIR"
+
+    # Start mongod with generous cache so data loads quickly without eviction
+    $MONGOD_CMD --dbpath "$SEED_DIR" --wiredTigerEngineConfigString="cache_size=1G" --logpath "$SEED_DIR/mongod_load.log" &
+    LOAD_PID=$!
+
+    echo "Waiting for seed mongod to start..."
+    sleep 3
+
+    $DEV_ENV_DIR/venv/bin/python3 $DEV_ENV_DIR/scripts/mongo_workload.py --action load --records $RECORD_COUNT --threads 8
+
+    echo "Shutting down seed mongod..."
+    kill -2 $LOAD_PID || true
+    wait $LOAD_PID || true
+    sleep 2
+
+    # Clean any traces or stats from seed directory
+    rm -f "$SEED_DIR/iaf_trace.hist" "$SEED_DIR/WiredTigerStat.*"
+    echo "Seed database ready at $SEED_DIR"
+else
+    echo "======================================"
+    echo "Using existing seed database at $SEED_DIR"
+    echo "======================================"
+fi
+
+# ---------------------------------------------------------
+# Phase 2: Benchmark Iterations Across Cache Sizes
+# ---------------------------------------------------------
+echo "CacheSize,MissRatio" > "$RESULTS_DIR/real_miss_ratios.csv"
 
 for size in "${CACHE_SIZES[@]}"; do
     echo "======================================"
@@ -29,26 +70,23 @@ for size in "${CACHE_SIZES[@]}"; do
     echo "======================================"
 
     rm -rf MONGO_DATA
-    mkdir -p MONGO_DATA
+    # Copy clean seed database (APFS on macOS uses fast copy-on-write clone)
+    cp -R "$SEED_DIR" MONGO_DATA
+    rm -f MONGO_DATA/iaf_trace.hist MONGO_DATA/WiredTigerStat.*
 
-    # Start mongod. We pass statistics_log to periodically flush WT stats to a file.
+    # Start mongod. Trace records cleanly starting from t=0 on pure read workload.
     $MONGOD_CMD --dbpath MONGO_DATA --wiredTigerEngineConfigString="cache_size=$size,statistics=(all),statistics_log=(wait=1)" --logpath mongod.log &
     MONGOD_PID=$!
 
     echo "Waiting for mongod to start..."
     sleep 3
 
-    echo "Loading data with YCSB..."
-    $YCSB_CMD load mongodb -s -P $YCSB_DIR/workloads/workloadc -p mongodb.url="mongodb://localhost:27017/ycsb?w=0" -p recordcount=$RECORD_COUNT > ycsb_load.log 2>&1
-
-    echo "Running workload with YCSB ($DISTRIBUTION)..."
-    $YCSB_CMD run mongodb -s -P $YCSB_DIR/workloads/workloadc -p mongodb.url="mongodb://localhost:27017/ycsb?w=0" -p requestdistribution=$DISTRIBUTION -p operationcount=$OPERATION_COUNT > ycsb_run.log 2>&1
+    echo "Running fixed-count workload ($DISTRIBUTION, $OPERATION_COUNT ops)..."
+    $DEV_ENV_DIR/venv/bin/python3 $DEV_ENV_DIR/scripts/mongo_workload.py --action run --operations $OPERATION_COUNT --distribution $DISTRIBUTION --records $RECORD_COUNT --threads 8 > run.log 2>&1
 
     echo "Shutting down mongod to flush IAF trace..."
     kill -2 $MONGOD_PID || true
     wait $MONGOD_PID || true
-    
-    # Wait for mongod to fully exit and finish writing the log
     sleep 2
 
     out_file="iaf_${size}.hist"

@@ -22,9 +22,9 @@ def parse_size_str(size_str):
         return int(size_str[:-1]) * 1024 * 1024 * 1024
     return int(size_str)
 
-plt.figure(figsize=(10, 6))
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
-colors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'cyan', 'magenta']
+colors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'cyan', 'magenta', 'navy', 'olive']
 if os.path.exists(RESULTS_DIR):
     hist_files = [f for f in os.listdir(RESULTS_DIR) if f.startswith('iaf_') and f.endswith('.hist')]
     hist_files.sort(key=lambda f: parse_size_str(f.replace('iaf_', '').replace('.hist', '')))
@@ -52,11 +52,11 @@ if os.path.exists(RESULTS_DIR):
             continue
             
         miss_ratios = 1.0 - (hits / total_accesses)
-        
         cache_sizes_mb = (cache_sizes_pages * PAGE_SIZE_BYTES) / (1024 * 1024)
         
-        label = f"IAF Curve ({hist_file})"
-        plt.plot(cache_sizes_mb, miss_ratios, label=label, color=colors[i % len(colors)])
+        label = f"IAF ({hist_file.replace('.hist','')})"
+        ax1.plot(cache_sizes_mb, miss_ratios, label=label, color=colors[i % len(colors)], alpha=0.8)
+        ax2.plot(cache_sizes_mb, miss_ratios, label=label, color=colors[i % len(colors)], alpha=0.8)
 
     real_mrc_path = os.path.join(RESULTS_DIR, 'real_miss_ratios.csv')
     if os.path.exists(real_mrc_path):
@@ -70,12 +70,24 @@ if os.path.exists(RESULTS_DIR):
             real_sizes_mb.append(size_bytes / (1024 * 1024))
             real_mr.append(row['MissRatio'])
             
-        plt.scatter(real_sizes_mb, real_mr, color='black', marker='X', s=100, label="Real WT Cache Miss Ratio", zorder=5)
+        ax1.scatter(real_sizes_mb, real_mr, color='black', marker='X', s=80, label="Real WT Miss Ratio", zorder=5)
+        ax2.scatter(real_sizes_mb, real_mr, color='black', marker='X', s=80, label="Real WT Miss Ratio", zorder=5)
 
-plt.xlabel(f'Cache Size (MB) [Assuming {PAGE_SIZE_BYTES}B quantization]')
-plt.ylabel('Miss Ratio')
-plt.title(f'MongoDB Workload C: IAF vs Real WT Cache Stats ({os.path.basename(RESULTS_DIR)})')
-plt.legend()
-plt.grid(True)
-plt.savefig(OUTPUT_IMAGE)
+ax1.set_xlabel('Cache Size (MB)')
+ax1.set_ylabel('Miss Ratio')
+ax1.set_title('Full IAF MRC Curve (0–250 MB)')
+ax1.grid(True)
+ax1.legend(fontsize=8)
+
+ax2.set_xlabel('Cache Size (MB)')
+ax2.set_ylabel('Miss Ratio')
+ax2.set_xlim(0, 15)
+ax2.set_ylim(0, 0.15)
+ax2.set_title('Zoomed Operational Range (0–15 MB)')
+ax2.grid(True)
+ax2.legend(fontsize=8)
+
+plt.tight_layout()
+plt.savefig(OUTPUT_IMAGE, dpi=150)
 print(f"Plot saved to {OUTPUT_IMAGE}")
+
