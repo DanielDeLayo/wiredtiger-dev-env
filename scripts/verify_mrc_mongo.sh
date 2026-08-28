@@ -12,7 +12,7 @@ else
     MONGOD_CMD="$MONGO_DIR/bazel-bin/src/mongo/db/mongod"
 fi
 
-DISTRIBUTION=${1:-zipfian}
+DISTRIBUTION=${1:-multitier}
 WRITE_RATIO=${2:-0.0}
 
 if [ "$WRITE_RATIO" != "0.0" ] && [ "$WRITE_RATIO" != "0" ]; then
@@ -22,7 +22,7 @@ else
 fi
 SEED_DIR="$DEV_ENV_DIR/data/mongo_data_seed"
 
-CACHE_SIZES=("1M" "2M" "3M" "4M" "5M" "6M" "7M" "8M" "9M" "10M")
+CACHE_SIZES=("1M" "2M" "3M" "5M" "7M" "10M" "15M" "20M")
 RECORD_COUNT=300000
 OPERATION_COUNT=300000
 

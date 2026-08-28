@@ -27,7 +27,18 @@ def worker_workload(ops_count, total_docs, distribution, write_ratio, host, port
     client = MongoClient(host, port)
     coll = client['ycsb']['usertable']
     
-    if distribution == 'zipfian':
+    if distribution == 'multitier':
+        # Bi-modal multi-tier working set:
+        # Tier 1 (Hot, ~2MB): 45% of accesses into first 2,000 docs
+        # Tier 2 (Warm, ~8MB): 35% of accesses into docs 2,000 to 10,000
+        # Tier 3 (Cold, ~300MB): 20% of accesses into remaining docs
+        r = np.random.random(ops_count)
+        t1_u = np.random.uniform(0, 1, ops_count)
+        t1_keys = (2000 * (t1_u ** 1.8)).astype(int)
+        t2_keys = np.random.randint(2000, 10000, ops_count)
+        t3_keys = np.random.randint(10000, total_docs, ops_count)
+        keys = np.where(r < 0.45, t1_keys, np.where(r < 0.80, t2_keys, t3_keys))
+    elif distribution == 'zipfian':
         # Generate Zipfian keys with power law
         keys = (np.random.zipf(a=1.5, size=ops_count) - 1) % total_docs
     else:
@@ -55,7 +66,7 @@ def main():
     parser.add_argument('--action', choices=['load', 'run'], required=True)
     parser.add_argument('--records', type=int, default=300000)
     parser.add_argument('--operations', type=int, default=300000)
-    parser.add_argument('--distribution', choices=['zipfian', 'uniform'], default='zipfian')
+    parser.add_argument('--distribution', choices=['multitier', 'zipfian', 'uniform'], default='multitier')
     parser.add_argument('--write-ratio', type=float, default=0.0, help="Ratio of write operations (0.0 to 1.0)")
     parser.add_argument('--threads', type=int, default=8)
     parser.add_argument('--host', default='127.0.0.1')

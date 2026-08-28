@@ -81,9 +81,9 @@ ax1.legend(fontsize=8)
 
 ax2.set_xlabel('Cache Size (MB)')
 ax2.set_ylabel('Miss Ratio')
-ax2.set_xlim(0, 15)
-ax2.set_ylim(0, 0.15)
-ax2.set_title('Zoomed Operational Range (0–15 MB)')
+ax2.set_xlim(0, 25)
+ax2.set_ylim(0, 1.0)
+ax2.set_title('Operational Range (0–25 MB)')
 ax2.grid(True)
 ax2.legend(fontsize=8)
 
