@@ -1,0 +1,384 @@
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 74dad00..892d2fa 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -1,4 +1,6 @@
+-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
++load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
++load("@rules_cc//cc:cc_library.bzl", "cc_library")
++load("@rules_cc//cc:cc_test.bzl", "cc_test")
+ 
+ package(default_visibility = ["//visibility:public"])
+ 
+@@ -7,9 +9,9 @@ config_setting(
+     define_values = {"addr_size": "32"},
+ )
+ 
+-COPTS_32BIT = [] + select({
++COPTS_32BIT = select({
+     ":fast32bit": ["-DFAST_32BIT"],
+-    "@platforms//os:macos": [],
++    "//conditions:default": [],
+ })
+ 
+ config_setting(
+@@ -33,7 +35,7 @@ cc_binary(
+     linkopts = select({
+         ":openmp_disabled": [],
+         "@bazel_tools//src/conditions:darwin": [],
+-        "@platforms//os:macos": ["-lgomp"],
++        "//conditions:default": ["-lgomp"],
+     }),
+     deps = [
+         ":bounded_iaf",
+@@ -117,7 +119,7 @@ cc_library(
+     copts = COPTS_32BIT + select({
+         ":openmp_disabled": [],
+         "@bazel_tools//src/conditions:darwin": [],
+-        "@platforms//os:macos": ["-fopenmp"],
++        "//conditions:default": ["-fopenmp"],
+     }),
+     includes = ["includes"],
+     deps = [
+@@ -159,7 +161,7 @@ cc_test(
+     linkopts = select({
+         ":openmp_disabled": [],
+         "@bazel_tools//src/conditions:darwin": [],
+-        "@platforms//os:macos": ["-lgomp"],
++        "//conditions:default": ["-lgomp"],
+     }),
+     deps = [
+         ":bounded_iaf",
+@@ -176,7 +178,7 @@ cc_test(
+     linkopts = select({
+         ":openmp_disabled": [],
+         "@bazel_tools//src/conditions:darwin": [],
+-        "@platforms//os:macos": ["-lgomp"],
++        "//conditions:default": ["-lgomp"],
+     }),
+     deps = [
+         ":iaf_api",
+diff --git a/includes/bounded_iaf.h b/includes/bounded_iaf.h
+index 45bc4ed..02d365f 100644
+--- a/includes/bounded_iaf.h
++++ b/includes/bounded_iaf.h
+@@ -70,6 +70,11 @@ class BoundedIAF : public CacheSim {
+ 
+   void flush();
+ 
++  /* Equivalent to print_small_csv(os, get_success_function()), but walks the success function as a
++   * running prefix sum of the hits vector instead of materializing it. The vector this avoids is
++   * the size of the hits vector, or (sample_mask+1) times larger when sampling. */
++  void print_small_csv_streaming(std::ostream& os);
++
+   void reset() override {
+     CacheSim::reset();
+     chunk_input.requests.clear();
+@@ -82,6 +87,16 @@ class BoundedIAF : public CacheSim {
+   inline size_t get_u() { return cur_u; };
+   inline size_t get_mem_limit() { return max_living_req; };
+ 
++  /* Largest cache size, in blocks, the curve can represent. Sampling scales the axis back up, so
++   * this is the sampled limit multiplied back out rather than max_living_req itself. */
++  inline size_t get_max_cache_size() { return max_living_req * (sample_mask + 1); };
++
++  /* Re-bound the curve. Raising the bound only affects requests from here on; history already
++   * dropped under a smaller bound is not recovered. */
++  inline void set_max_cache_size(size_t max_cache_size) {
++    max_living_req = max_cache_size / (sample_mask + 1);
++  };
++
+   const size_t initial_chunk_size;
+ 
+   /* BoundedIAF Constructor.
+diff --git a/includes/cache_sim.h b/includes/cache_sim.h
+index 4e7070c..985f6c0 100644
+--- a/includes/cache_sim.h
++++ b/includes/cache_sim.h
+@@ -113,7 +113,7 @@ class CacheSim {
+ 
+   void inc_access(uint64_t count) {access_number += count;};
+ 
+-  void dump_success_function(std::ostream& os, SuccessVector succ, size_t stride=1) {
++  void dump_success_function(std::ostream& os, const SuccessVector& succ, size_t stride=1) {
+     assert(stride < succ.size());
+     size_t total_requests = access_number - 1;
+     if (sample_mask)
+@@ -131,7 +131,7 @@ class CacheSim {
+        << std::setw(16) << percent(misses, total_requests) << "%" << std::endl;
+   }
+   
+-  void csv_success_function(std::ostream& os, SuccessVector succ, size_t stride=1) {
++  void csv_success_function(std::ostream& os, const SuccessVector& succ, size_t stride=1) {
+     if (succ.size() == 0)
+       return;
+     assert(stride < succ.size());
+@@ -147,7 +147,7 @@ class CacheSim {
+     }
+   }
+ 
+-  void print_small_csv(std::ostream& os, SuccessVector succ) {
++  void print_small_csv(std::ostream& os, const SuccessVector& succ) {
+     if (succ.size() <= 1)
+       return;
+ 
+@@ -165,8 +165,12 @@ class CacheSim {
+     size_t last_printed_page = 1;
+ 
+     for (size_t i = 2; i < succ.size(); ++i) {
+-        // Print if we have < 1000 total cache sizes, or if cache size grew by 5%, or hits grew by 1%
+-        if (succ.size() < 1000 || i >= last_printed_page * 1.05 || succ[i] >= last_printed_hits * 1.01) {
++        // Print if we have < 1000 total cache sizes, or if cache size grew by 5%, or hits grew by
++        // 1%. The 1% is a floor of one hit, since at 0 hits a ratio test would always pass.
++        double min_hits = last_printed_hits * 1.01;
++        if (min_hits < last_printed_hits + 1.0)
++          min_hits = last_printed_hits + 1.0;
++        if (succ.size() < 1000 || i >= last_printed_page * 1.05 || succ[i] >= min_hits) {
+             os << i << "," << succ[i] << std::endl;
+             last_printed_hits = succ[i];
+             last_printed_page = i;
+diff --git a/includes/iaf_api.h b/includes/iaf_api.h
+index 61237cf..3599e81 100644
+--- a/includes/iaf_api.h
++++ b/includes/iaf_api.h
+@@ -3,6 +3,9 @@
+ 
+ #include <stddef.h>
+ #include <stdint.h>
++#ifndef __cplusplus
++#include <stdbool.h>
++#endif
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -16,6 +19,14 @@ typedef struct Iaf_t* Iaf;
+ #define IAF_PAGE_OVERFLOW 3
+ #define IAF_ID_RESERVED_BOUNDARY 3
+ 
++/*
++ * Granularity, in bytes, of a single unit on the cache-size axis of the curve produced by
++ * Iaf_stringify / Iaf_dump_file. Iaf_write rounds each access up to a whole number of these, and
++ * the max_cache_size argument to Iaf_create is counted in them. Callers need this to convert
++ * between their own byte-denominated cache sizes and the curve.
++ */
++#define IAF_BLOCK_SIZE 256
++
+ Iaf Iaf_create(int sampling_log2, size_t max_cache_size);
+ void Iaf_destroy(Iaf* h);
+ void Iaf_reset(Iaf h);
+@@ -24,6 +35,20 @@ char* Iaf_stringify(Iaf h);
+ void Iaf_dump_file(Iaf h, const char* filepath);
+ void Iaf_flush(Iaf h);
+ uint64_t Iaf_grab_id(Iaf h);
++
++/*
++ * Largest cache size, in IAF_BLOCK_SIZE units, that the curve can represent. Requests older than
++ * this are dropped, so the curve says nothing about cache sizes beyond it.
++ */
++size_t Iaf_max_cache_blocks(Iaf h);
++
++/*
++ * Re-bound the curve, in IAF_BLOCK_SIZE units. Intended to be called once the caller knows the
++ * cache size it wants the curve to cover, which it may not at Iaf_create time. Raising the bound
++ * applies to subsequent requests only; history already dropped under a smaller bound is gone. A
++ * bound of zero is ignored rather than dropping everything.
++ */
++void Iaf_set_max_cache_blocks(Iaf h, size_t max_cache_blocks);
+ void Iaf_free_string(char*);
+ 
+ #ifdef __cplusplus
+diff --git a/src/bounded_iaf.cc b/src/bounded_iaf.cc
+index 8d45bb0..5dc7487 100644
+--- a/src/bounded_iaf.cc
++++ b/src/bounded_iaf.cc
+@@ -142,6 +142,65 @@ void BoundedIAF::flush() {
+   }
+ }
+ 
++void BoundedIAF::print_small_csv_streaming(std::ostream& os) {
++  // Ensure all requests processed
++  flush();
++
++  const SuccessVector& hits = chunk_input.output.hits_vector;
++  const size_t samples_per_measure = sample_mask + 1;
++
++  // Size the success function would have had, without building it.
++  const size_t succ_size = hits.size() == 0 ? 1 : 1 + (hits.size() - 1) * samples_per_measure;
++  if (succ_size <= 1)
++    return;
++
++  size_t total_requests = access_number - 1;
++  if (sample_mask)
++    total_requests = (sample_access_number - 1) * samples_per_measure;
++
++  os << total_requests << "," << succ_size - 1 << "," << access_number - 1 << std::endl;
++  os << "Cache Size,Hits" << std::endl;
++
++  // succ[page] is the prefix sum of hits up to the entry covering that page. Without sampling that
++  // is one hits entry per page; with sampling each entry covers samples_per_measure pages and the
++  // count is scaled back up. Pages are visited in increasing order, so the prefix sum only ever
++  // moves forward.
++  size_t hits_idx = 0;
++  size_t running_count = num_duplicates;
++  auto succ_at = [&](size_t page) {
++    size_t want = sample_mask ? (page - 1) / samples_per_measure + 1 : page;
++    for (; hits_idx < want; ++hits_idx)
++      running_count += hits[hits_idx + 1];
++    return sample_mask ? running_count * samples_per_measure : running_count;
++  };
++
++  // Always print the first point.
++  size_t value = succ_at(1);
++  os << 1 << "," << value << std::endl;
++
++  double last_printed_hits = value;
++  size_t last_printed_page = 1;
++
++  for (size_t i = 2; i < succ_size; ++i) {
++    value = succ_at(i);
++    // Print if we have < 1000 total cache sizes, or if cache size grew by 5%, or hits grew by 1%.
++    // The 1% is a floor of one hit, since at 0 hits a ratio test would always pass.
++    double min_hits = last_printed_hits * 1.01;
++    if (min_hits < last_printed_hits + 1.0)
++      min_hits = last_printed_hits + 1.0;
++    if (succ_size < 1000 || i >= last_printed_page * 1.05 || value >= min_hits) {
++      os << i << "," << value << std::endl;
++      last_printed_hits = value;
++      last_printed_page = i;
++    }
++  }
++
++  // Always print the last point if it hasn't been printed.
++  if (succ_size - 1 > last_printed_page) {
++    os << succ_size - 1 << "," << value << std::endl;
++  }
++}
++
+ CacheSim::SuccessVector BoundedIAF::get_success_function() {
+   // Ensure all requests processed
+   flush();
+diff --git a/src/iaf_api.cc b/src/iaf_api.cc
+index 3ec6592..f3db724 100644
+--- a/src/iaf_api.cc
++++ b/src/iaf_api.cc
+@@ -17,23 +17,37 @@ struct Iaf_t
+ {
+     BoundedIAF b;
+ 
++    /* Accesses rejected by should_sample() without taking the lock. They still count towards the
++     * total request number the curve reports, so they are banked here and folded in by the next
++     * caller that does take the lock. */
++    std::atomic<uint64_t> unsampled{0};
++
+     Iaf_t(int sampling_log2, size_t max_cache_size): 
+     b(sampling_log2, 101010101010, 0, 100000, max_cache_size) {};
+ };
+ 
++/* Fold banked unsampled accesses into the access count. Caller must hold iaf_lock. */
++static void iaf_fold_unsampled(Iaf h)
++{
++    uint64_t skipped = h->unsampled.exchange(0, std::memory_order_relaxed);
++    if (skipped > 0)
++        h->b.inc_access(skipped);
++}
++
+ Iaf Iaf_create(int sampling_log2, size_t max_cache_size)
+ {
+     return new Iaf_t(sampling_log2, max_cache_size);
+ }
+ 
+ std::mutex iaf_lock;
+-constexpr size_t kBlockSize = 256;
++constexpr size_t kBlockSize = IAF_BLOCK_SIZE;
+ 
+ void Iaf_reset(Iaf h)
+ {
+     if (h == nullptr)
+         return;
+     std::scoped_lock lock{iaf_lock};
++    h->unsampled.store(0, std::memory_order_relaxed);
+     h->b.reset();
+ }
+ 
+@@ -44,7 +58,15 @@ bool Iaf_write(Iaf h, void* addr, size_t bytes)
+     if (addr == (void*)IAF_ID_IGNORE || addr == (void*)IAF_PAGE_OVERFLOW)
+         return false;
+     
++    /* should_sample() is a pure function of the address and immutable state, so the accesses it
++     * rejects -- most of them, once sampling is on -- never need to touch the lock. */
++    if (!h->b.should_sample((req_count_t)addr)) {
++        h->unsampled.fetch_add(1, std::memory_order_relaxed);
++        return false;
++    }
++
+     std::scoped_lock lock{iaf_lock};  //TODO: Remove this lock eventually?
++    iaf_fold_unsampled(h);
+     req_count_t nblocks = (bytes + kBlockSize - 1) / kBlockSize;
+     return h->b.memory_access((req_count_t)addr, nblocks);
+ }
+@@ -52,19 +74,24 @@ bool Iaf_write(Iaf h, void* addr, size_t bytes)
+ char* Iaf_stringify(Iaf h)
+ {
+     std::scoped_lock lock{iaf_lock};
++    iaf_fold_unsampled(h);
+     std::stringstream ss;
+     h->b.flush();
+-    h->b.print_small_csv(ss, h->b.get_success_function());
+-    const std::string& s = ss.str();
++    h->b.print_small_csv_streaming(ss);
++
++    // strdup so the result stays free()-able by Iaf_free_string. stringstream::view() would save a
++    // copy of the string here, but it is C++20 and the bazel build does not pin a standard.
++    const std::string s = ss.str();
+     return strdup(s.c_str());
+ }
+ 
+ void Iaf_dump_file(Iaf h, const char* filepath)
+ {
+     std::scoped_lock lock{iaf_lock};
++    iaf_fold_unsampled(h);
+     std::ofstream out(filepath);
+     h->b.flush();
+-    h->b.print_small_csv(out, h->b.get_success_function());
++    h->b.print_small_csv_streaming(out);
+ }
+ 
+ void Iaf_free_string(char* s)
+@@ -79,6 +106,22 @@ void Iaf_destroy(Iaf* h)
+     *h = nullptr;
+ }
+ 
++size_t Iaf_max_cache_blocks(Iaf h)
++{
++    if (h == nullptr)
++        return 0;
++    std::scoped_lock lock{iaf_lock};
++    return h->b.get_max_cache_size();
++}
++
++void Iaf_set_max_cache_blocks(Iaf h, size_t max_cache_blocks)
++{
++    if (h == nullptr || max_cache_blocks == 0)
++        return;
++    std::scoped_lock lock{iaf_lock};
++    h->b.set_max_cache_size(max_cache_blocks);
++}
++
+ std::atomic<uint64_t> counter(IAF_ID_RESERVED_BOUNDARY); // Initialize an atomic counter to minimum value
+ 
+ uint64_t Iaf_grab_id(Iaf h)
+diff --git a/src/increment_and_freeze.cc b/src/increment_and_freeze.cc
+index 846ba6a..cea7cec 100644
+--- a/src/increment_and_freeze.cc
++++ b/src/increment_and_freeze.cc
+@@ -89,7 +89,9 @@ req_count_t IncrementAndFreeze::populate_operations(
+   STOPTIME(allocate_ops);
+ 
+   STARTTIME(build_op_array);
+-  req_count_t unique_ids = 0;
++  // Counted but not returned any more -- populate_operations returns max_hit. Kept, with the
++  // reduction clause, in case a caller wants the unique-id count back.
++  [[maybe_unused]] req_count_t unique_ids = 0;
+ #pragma omp parallel reduction(+:unique_ids)
+   {
+     std::vector<request> living_req_priv;

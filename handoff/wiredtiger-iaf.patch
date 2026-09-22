@@ -1,0 +1,975 @@
+diff --git a/.gitignore b/.gitignore
+index 3901eae826..289d058e1f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -30,3 +30,5 @@ CLAUDE.local.md
+ .claude/settings.local.json
+ .claude/agent-memory-local/
+ .claude/worktrees/
++
++WT_TEST
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ef9e1ef376..d5f9faee7a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -145,6 +145,28 @@ if(HAVE_UNITTEST)
+     )
+ endif()
+ 
++if(HAVE_ANALYZE_CACHE)
++    include(FetchContent)
++
++    # Point this at a checkout of https://github.com/DanielDeLayo/Increment-and-Freeze.
++    # Defaults to a sibling of the WiredTiger source tree.
++    set(IAF_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../Increment-and-Freeze"
++        CACHE PATH "Path to the Increment-and-Freeze source tree")
++    if(NOT EXISTS "${IAF_SOURCE_DIR}/CMakeLists.txt")
++        message(FATAL_ERROR
++            "HAVE_ANALYZE_CACHE is set but no Increment-and-Freeze checkout was found at "
++            "'${IAF_SOURCE_DIR}'. Pass -DIAF_SOURCE_DIR=<path> to point at one.")
++    endif()
++
++    FetchContent_Declare(
++        IAF
++        SOURCE_DIR ${IAF_SOURCE_DIR}
++    )
++
++    FetchContent_MakeAvailable(IAF)
++    set_property(TARGET IAF PROPERTY POSITION_INDEPENDENT_CODE ON)
++endif()
++
+ # Enable CTest. Subsequent targets may additionally define their own ctest definitions.
+ enable_testing()
+ include(test/ctest_helpers.cmake)
+@@ -206,6 +228,9 @@ if(WITH_PIC OR ENABLE_SHARED)
+         ${CMAKE_CURRENT_BINARY_DIR}/config
+         ${CMAKE_CURRENT_LIST_DIR}/src/include
+     )
++    if(HAVE_ANALYZE_CACHE)
++        target_link_libraries(wt_objs PUBLIC IAF::IAF)
++    endif()
+     # Append any provided C flags.
+     if(COMPILER_DIAGNOSTIC_C_FLAGS)
+         target_compile_options(wt_objs PRIVATE ${COMPILER_DIAGNOSTIC_C_FLAGS})
+diff --git a/bench/workgen/CMakeLists.txt b/bench/workgen/CMakeLists.txt
+index cecd100c8f..38aa10cb4d 100644
+--- a/bench/workgen/CMakeLists.txt
++++ b/bench/workgen/CMakeLists.txt
+@@ -41,6 +41,10 @@ target_include_directories(
+ )
+ target_link_libraries(workgen_cpp test_util Python3::Python)
+ 
++if(HAVE_ANALYZE_CACHE)
++    target_link_libraries(workgen_cpp IAF::IAF)
++endif()
++
+ # For some reason, libstdc++ symbols collide when running workgen under the V5 toolchain
+ # on armv9 machines. Therefore prevent symbols from being exported inside the workgen cpp
+ # library as a workaround.
+diff --git a/bench/wtperf/runners/ycsb-100read.wtperf b/bench/wtperf/runners/ycsb-100read.wtperf
+new file mode 100644
+index 0000000000..863606df8a
+--- /dev/null
++++ b/bench/wtperf/runners/ycsb-100read.wtperf
+@@ -0,0 +1,21 @@
++# This configuration is intended to be executed on a system with at least 32 GB of RAM and 16 CPUs.
++# Because of that, cache_size is set to 16 GB, since this is typically the WiredTiger cache size for
++# a 32 GB RAM system (50%).
++# This is also the reason for having 30M entries, which are expected to generate approximately 32 GB
++# of on-disk data, so the cache should hold around 50% of the total dataset.
++# The total number of user threads is also set to 16 to avoid oversubscription.
++
++conn_config="cache_size=16G,log=(enabled=true)"
++pareto=20
++scramble=true
++table_config="type=file"
++key_sz=100
++value_sz=1024
++icount=30000000
++retry_writes=true
++run_time=1800
++threads=((count=16,reads=1))
++warmup=120
++sample_interval=5
++populate_threads=8
++report_interval=5
+diff --git a/cmake/configs/wiredtiger_config.h.in b/cmake/configs/wiredtiger_config.h.in
+index 05d04821de..bf11745a0a 100644
+--- a/cmake/configs/wiredtiger_config.h.in
++++ b/cmake/configs/wiredtiger_config.h.in
+@@ -48,6 +48,9 @@
+ /* Define to 1 for unit tests. */
+ #cmakedefine HAVE_UNITTEST 1
+ 
++/* Define to 1 for cache size analysis. */
++#cmakedefine HAVE_ANALYZE_CACHE 1
++
+ /*
+  * Define to 1 to when measuring code coverage to make measurements more accurate, by switching code where needed,
+  * for example from macros to inline functions.
+diff --git a/cmake/define_libwiredtiger.cmake b/cmake/define_libwiredtiger.cmake
+index 753e9c589c..b1d37eba47 100644
+--- a/cmake/define_libwiredtiger.cmake
++++ b/cmake/define_libwiredtiger.cmake
+@@ -58,6 +58,9 @@ macro(define_wiredtiger_library target type)
+     if(ENABLE_MEMKIND)
+         target_link_libraries(${target} PRIVATE wt::memkind)
+     endif()
++    if(HAVE_ANALYZE_CACHE)
++        target_link_libraries(${target} PUBLIC IAF::IAF)
++    endif()
+ 
+     # We want to capture any transitive dependencies associated with the builtin library
+     # target and ensure we are explicitly linking the 3rd party libraries.
+diff --git a/ext/test/fail_fs/CMakeLists.txt b/ext/test/fail_fs/CMakeLists.txt
+index 3be56dc524..080afca153 100644
+--- a/ext/test/fail_fs/CMakeLists.txt
++++ b/ext/test/fail_fs/CMakeLists.txt
+@@ -14,3 +14,6 @@ target_compile_options(
+     PRIVATE ${COMPILER_DIAGNOSTIC_C_FLAGS}
+ )
+ target_link_libraries(wiredtiger_fail_fs test_util)
++if(HAVE_ANALYZE_CACHE)
++    target_link_libraries(wiredtiger_fail_fs IAF::IAF)
++endif()
+diff --git a/src/block/block_addr.c b/src/block/block_addr.c
+index 9649c89e6b..26fc47ee32 100644
+--- a/src/block/block_addr.c
++++ b/src/block/block_addr.c
+@@ -152,6 +152,10 @@ __wt_block_addr_invalid(
+     /* Crack the cookie. */
+     WT_RET(__wt_block_addr_unpack(
+       session, block, addr, addr_size, &objectid, &offset, &size, &checksum));
++#ifdef HAVE_ANALYZE_CACHE
++    /* The cookie's object ID slot carries the persistent page ID in this build; ignore it here. */
++    objectid = 0;
++#endif
+ 
+ #ifdef HAVE_DIAGNOSTIC
+     /*
+@@ -183,6 +187,10 @@ __wt_block_addr_string(
+     /* Crack the cookie. */
+     WT_RET(__wt_block_addr_unpack(
+       session, block, addr, addr_size, &objectid, &offset, &size, &checksum));
++#ifdef HAVE_ANALYZE_CACHE
++    /* The cookie's object ID slot carries the persistent page ID in this build; ignore it here. */
++    objectid = 0;
++#endif
+ 
+     /* Printable representation. */
+     WT_RET(__wt_buf_fmt(session, buf,
+diff --git a/src/block/block_ckpt.c b/src/block/block_ckpt.c
+index 78dd9baf49..76ad878a38 100644
+--- a/src/block/block_ckpt.c
++++ b/src/block/block_ckpt.c
+@@ -8,6 +8,10 @@
+ 
+ #include "wt_internal.h"
+ 
++#ifdef HAVE_ANALYZE_CACHE
++#include "iaf_api.h"
++#endif
++
+ static int __ckpt_delete_and_merge(WT_SESSION_IMPL *, WT_BLOCK *, WT_CKPT *, WT_BLOCK_CKPT *);
+ static int __ckpt_process(WT_SESSION_IMPL *, WT_BLOCK *, WT_CKPT *);
+ static int __ckpt_read_deletion_extlists(WT_SESSION_IMPL *, WT_BLOCK *, WT_CKPT *, bool *);
+@@ -127,12 +131,20 @@ __wt_block_checkpoint_load(WT_SESSION_IMPL *session, WT_BLOCK *block, const uint
+ 
+         /* Read any root page. */
+         if (ci->root_offset != WT_BLOCK_INVALID_OFFSET) {
++#ifndef HAVE_ANALYZE_CACHE
+             /* A checkpoint shouldn't point to an object created after this one. */
+             WT_ASSERT(session, block->objectid >= ci->root_objectid);
++#endif
+ 
+             endp = root_addr;
++#ifdef HAVE_ANALYZE_CACHE
++            /* The object ID slot carries the persistent page ID; the root page is always 1. */
++            WT_ERR(
++              __wt_block_addr_pack(block, &endp, 1, ci->root_offset, ci->root_size, ci->root_checksum));
++#else
+             WT_ERR(__wt_block_addr_pack(
+               block, &endp, ci->root_objectid, ci->root_offset, ci->root_size, ci->root_checksum));
++#endif
+             *root_addr_sizep = WT_PTRDIFF(endp, root_addr);
+         }
+ 
+diff --git a/src/block/block_ext.c b/src/block/block_ext.c
+index a3331b5d96..bb79f1fcbc 100644
+--- a/src/block/block_ext.c
++++ b/src/block/block_ext.c
+@@ -635,6 +635,10 @@ __wt_block_free(WT_SESSION_IMPL *session, WT_BLOCK *block, const uint8_t *addr,
+     /* Crack the cookie. */
+     WT_RET(__wt_block_addr_unpack(
+       session, block, addr, addr_size, &objectid, &offset, &size, &checksum));
++#ifdef HAVE_ANALYZE_CACHE
++    /* The cookie's object ID slot carries the persistent page ID in this build; ignore it here. */
++    objectid = 0;
++#endif
+ 
+     /*
+      * Freeing blocks in a previous object isn't possible in the current architecture. We'd like to
+diff --git a/src/block/block_read.c b/src/block/block_read.c
+index 0c88957513..93ef32fec8 100644
+--- a/src/block/block_read.c
++++ b/src/block/block_read.c
+@@ -28,6 +28,12 @@ __wt_bm_read(WT_BM *bm, WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_ME
+     /* Crack the cookie. */
+     WT_RET(__wt_block_addr_unpack(
+       session, block, addr, addr_size, &objectid, &offset, &size, &checksum));
++#ifdef HAVE_ANALYZE_CACHE
++    assert(block_meta && "Block metadata uninit!");
++    if (block_meta->persistent_page_id != IAF_ID_IGNORE)
++        block_meta->persistent_page_id = objectid;
++    objectid = 0;
++#endif
+ 
+ #ifdef HAVE_DIAGNOSTIC
+     /*
+@@ -66,6 +72,10 @@ __wt_bm_corrupt(WT_BM *bm, WT_SESSION_IMPL *session, const uint8_t *addr, size_t
+     /* Crack the cookie, dump the block. */
+     WT_ERR(__wt_block_addr_unpack(
+       session, bm->block, addr, addr_size, &objectid, &offset, &size, &checksum));
++#ifdef HAVE_ANALYZE_CACHE
++    /* The cookie's object ID slot carries the persistent page ID in this build; ignore it here. */
++    objectid = 0;
++#endif
+     __wt_log_data_dump(session, tmp->data, tmp->size,
+       "corrupt dump: {%" PRIu32 ": %" PRIuMAX ", %" PRIu32 ", %#" PRIx32 "}", objectid,
+       (uintmax_t)offset, size, checksum);
+diff --git a/src/block/block_slvg.c b/src/block/block_slvg.c
+index 6bf1a12f99..fee080f612 100644
+--- a/src/block/block_slvg.c
++++ b/src/block/block_slvg.c
+@@ -177,6 +177,10 @@ __wt_block_salvage_valid(
+      */
+     WT_RET(__wt_block_addr_unpack(
+       session, block, addr, addr_size, &objectid, &offset, &size, &checksum));
++#ifdef HAVE_ANALYZE_CACHE
++    /* The cookie's object ID slot carries the persistent page ID in this build; ignore it here. */
++    objectid = 0;
++#endif
+     if (valid)
+         block->slvg_off = offset + size;
+     else {
+diff --git a/src/block/block_vrfy.c b/src/block/block_vrfy.c
+index 4e7386d547..894647104c 100644
+--- a/src/block/block_vrfy.c
++++ b/src/block/block_vrfy.c
+@@ -328,6 +328,10 @@ __wt_block_verify_addr(
+     /* Crack the cookie. */
+     WT_RET(__wt_block_addr_unpack(
+       session, block, addr, addr_size, &objectid, &offset, &size, &checksum));
++#ifdef HAVE_ANALYZE_CACHE
++    /* The cookie's object ID slot carries the persistent page ID in this build; ignore it here. */
++    objectid = 0;
++#endif
+ 
+     /* Add to the per-file list. */
+     WT_RET(__verify_filefrag_add(session, block, NULL, offset, size, false));
+diff --git a/src/block/block_write.c b/src/block/block_write.c
+index 3f427209ea..81116d127f 100644
+--- a/src/block/block_write.c
++++ b/src/block/block_write.c
+@@ -7,6 +7,11 @@
+  */
+ 
+ #include "wt_internal.h"
++#include <stdint.h>
++
++#ifdef HAVE_ANALYZE_CACHE
++#include "iaf_api.h"
++#endif
+ 
+ /*
+  * __wti_block_truncate --
+@@ -200,12 +205,30 @@ __wt_block_write(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_ITEM *buf,
+     uint8_t *endp;
+ 
+     WT_UNUSED(block_meta);
++#ifdef HAVE_ANALYZE_CACHE
++    /* FIXME: TODO Probably convert this to 64 bits at some point, or make 32 bits consistent */
++    assert(block_meta != NULL && "Block metadata uninit!");
++    assert(block->objectid == 0 && "Block id overwrite!");
++    if (block_meta != NULL &&
++        (block_meta->persistent_page_id == IAF_ID_NEED_REINIT ||
++         block_meta->persistent_page_id == IAF_ID_UNINIT)) {
++        block_meta->persistent_page_id = Iaf_grab_id(S2C(session)->iaf);
++    }
++    if (block_meta != NULL && block_meta->persistent_page_id > UINT32_MAX) {
++        block_meta->persistent_page_id = IAF_PAGE_OVERFLOW;
++    }
++#endif
+ 
+     WT_RET(__wti_block_write_off(
+       session, block, buf, &offset, &size, &checksum, data_checksum, checkpoint_io, false));
+ 
+     endp = addr;
++#ifdef HAVE_ANALYZE_CACHE
++    WT_RET(__wt_block_addr_pack(
++      block, &endp, (uint32_t)block_meta->persistent_page_id, offset, size, checksum));
++#else
+     WT_RET(__wt_block_addr_pack(block, &endp, block->objectid, offset, size, checksum));
++#endif
+     *addr_sizep = WT_PTRDIFF(endp, addr);
+ 
+     return (0);
+diff --git a/src/block_cache/block_io.c b/src/block_cache/block_io.c
+index fc4f61678e..1661a6c6f6 100644
+--- a/src/block_cache/block_io.c
++++ b/src/block_cache/block_io.c
+@@ -115,6 +115,7 @@ __wt_blkcache_read(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *b
+     const WT_PAGE_HEADER *dsk;
+     size_t compression_ratio, result_len;
+     uint64_t time_diff, time_start, time_stop;
++    uint32_t objectid;
+     u_int count, i, results_count;
+     bool blkcache_found, expect_conversion, found, skip_cache_put, timer;
+ 
+@@ -129,6 +130,8 @@ __wt_blkcache_read(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *b
+     memset(results, 0, sizeof(results));
+     results_count = 0;
+ 
++    WT_CLEAR(block_meta_tmp);
++
+     WT_ASSERT_ALWAYS(session, session->dhandle != NULL, "The block cache requires a dhandle");
+     /*
+      * If anticipating a compressed or encrypted block, start with a scratch buffer and convert into
+@@ -146,8 +149,14 @@ __wt_blkcache_read(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *b
+     }
+ 
+     /* Check for mapped blocks. */
+-    WT_RET(__wti_blkcache_map_read(session, ip, addr, addr_size, &found));
++
++    WT_RET(__wti_blkcache_map_read(session, ip, addr, addr_size, &found, &objectid));
+     if (found) {
++#ifdef HAVE_ANALYZE_CACHE
++        WT_ASSERT(session, block_meta != NULL);
++#endif
++        if (block_meta != NULL)
++            *block_meta = block_meta_tmp;
+         skip_cache_put = true;
+         if (!expect_conversion)
+             goto verify;
+@@ -203,6 +212,9 @@ __wt_blkcache_read(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *b
+             WT_STAT_SESSION_INCRV(session, read_time, time_diff);
+         }
+ 
++#ifdef HAVE_ANALYZE_CACHE
++        WT_ASSERT(session, block_meta != NULL);
++#endif
+         if (block_meta != NULL)
+             *block_meta = block_meta_tmp;
+ 
+@@ -462,7 +474,7 @@ __wt_blkcache_read_multi(WT_SESSION_IMPL *session, WT_ITEM **buf, size_t *buf_co
+          * FIXME-WT-14717: we used to read garbage values for block meta from the block cache for
+          * non-disaggregated case. It's unclear if we still do -- pass a NULL for now.
+          */
+-        WT_ERR(__wt_blkcache_read(session, &tmp[0], NULL, addr, addr_size));
++        WT_ERR(__wt_blkcache_read(session, &tmp[0], block_meta, addr, addr_size));
+         *buf_count = 1;
+         *buf = tmp;
+         return (0);
+@@ -808,6 +820,15 @@ __wt_blkcache_write(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *
+     dsk = NULL;
+     encrypted = false;
+ 
++    WT_PAGE_BLOCK_META block_meta_tmp;
++    WT_CLEAR(block_meta_tmp);
++#ifdef HAVE_ANALYZE_CACHE
++    block_meta_tmp.persistent_page_id = IAF_ID_NEED_REINIT;
++#endif
++
++    if (block_meta == NULL)
++        block_meta = &block_meta_tmp;
++
+     /* Optionally compress the data. */
+     WT_ERR_MSG_CHK(session,
+       __wt_blkcache_compress(session, buf, compressed, &ctmp, compressed_sizep, &compressed),
+diff --git a/src/block_cache/block_map.c b/src/block_cache/block_map.c
+index 96478f807e..e43a7719aa 100644
+--- a/src/block_cache/block_map.c
++++ b/src/block_cache/block_map.c
+@@ -81,8 +81,8 @@ __wti_blkcache_unmap(WT_SESSION_IMPL *session, WT_BLOCK *block, void *mapped_reg
+  *     Map address cookie referenced block into a buffer.
+  */
+ int
+-__wti_blkcache_map_read(
+-  WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr, size_t addr_size, bool *foundp)
++__wti_blkcache_map_read(WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr,
++  size_t addr_size, bool *foundp, uint32_t *objectidp)
+ {
+     WT_BLOCK *block;
+     WT_BM *bm;
+@@ -104,8 +104,16 @@ __wti_blkcache_map_read(
+     /* Crack the cookie. */
+     WT_RET(__wt_block_addr_unpack(
+       session, block, addr, addr_size, &objectid, &offset, &size, &checksum));
++    if (objectidp != NULL)
++        *objectidp = objectid;
+ 
++#ifndef HAVE_ANALYZE_CACHE
++    /*
++     * The cache analysis build repurposes the cookie's object ID to carry the persistent page ID,
++     * so the two no longer agree. Not supported on multi-handle trees either way.
++     */
+     WT_ASSERT(session, block->objectid == objectid);
++#endif
+ 
+     /* Map the block if it's possible. */
+     handle = block->fh->handle;
+diff --git a/src/btree/bt_handle.c b/src/btree/bt_handle.c
+index ed128a6d25..10c997d62a 100644
+--- a/src/btree/bt_handle.c
++++ b/src/btree/bt_handle.c
+@@ -1116,6 +1116,7 @@ __btree_preload(WT_SESSION_IMPL *session)
+     WT_BTREE *btree;
+     WT_DECL_ITEM(tmp);
+     WT_DECL_RET;
++    WT_PAGE_BLOCK_META block_meta_tmp;
+     WT_REF *ref;
+     uint64_t block_preload;
+ 
+@@ -1131,7 +1132,8 @@ __btree_preload(WT_SESSION_IMPL *session)
+              * FIXME-WT-14612: If we want to use prefetch with disaggregated storage we will need to
+              * supply block metadata.
+              */
+-            WT_ERR(__wt_blkcache_read(session, tmp, NULL, addr.addr, addr.size));
++
++            WT_ERR(__wt_blkcache_read(session, tmp, &block_meta_tmp, addr.addr, addr.size));
+             ++block_preload;
+         }
+     WT_INTL_FOREACH_END;
+diff --git a/src/btree/bt_ovfl.c b/src/btree/bt_ovfl.c
+index d571c3c3e1..0222510bc0 100644
+--- a/src/btree/bt_ovfl.c
++++ b/src/btree/bt_ovfl.c
+@@ -19,6 +19,11 @@ __ovfl_read(WT_SESSION_IMPL *session, const uint8_t *addr, size_t addr_size, WT_
+     const WT_PAGE_HEADER *dsk;
+ 
+     btree = S2BT(session);
++    WT_PAGE_BLOCK_META block_meta_tmp;
++    WT_CLEAR(block_meta_tmp);
++#ifdef HAVE_ANALYZE_CACHE
++    block_meta_tmp.persistent_page_id = IAF_ID_IGNORE;
++#endif
+ 
+     /*
+      * Read the overflow item from the block manager, then reference the start of the data and set
+@@ -27,7 +32,7 @@ __ovfl_read(WT_SESSION_IMPL *session, const uint8_t *addr, size_t addr_size, WT_
+      * Overflow reads are synchronous. That may bite me at some point, but WiredTiger supports large
+      * page sizes, overflow items should be rare.
+      */
+-    WT_RET(__wt_blkcache_read(session, store, NULL, addr, addr_size));
++    WT_RET(__wt_blkcache_read(session, store, &block_meta_tmp, addr, addr_size));
+     dsk = store->data;
+     store->data = WT_PAGE_HEADER_BYTE(btree, dsk);
+     store->size = dsk->u.datalen;
+diff --git a/src/btree/bt_page.c b/src/btree/bt_page.c
+index 203a6f941d..9ec7520c64 100644
+--- a/src/btree/bt_page.c
++++ b/src/btree/bt_page.c
+@@ -708,6 +708,9 @@ __wt_page_block_meta_assign(WT_SESSION_IMPL *session, WT_PAGE_BLOCK_META *meta)
+     WT_ASSERT(session, page_id >= WT_BLOCK_MIN_PAGE_ID);
+ 
+     meta->page_id = page_id;
++#ifdef HAVE_ANALYZE_CACHE
++    meta->persistent_page_id = 0;
++#endif
+     meta->disagg_lsn = WT_DISAGG_LSN_NONE;
+     meta->backlink_lsn = WT_DISAGG_LSN_NONE;
+     meta->base_lsn = WT_DISAGG_LSN_NONE;
+@@ -779,6 +782,10 @@ __wt_page_alloc(WT_SESSION_IMPL *session, uint8_t type, uint32_t alloc_entries,
+ 
+     page->type = type;
+     __wt_evict_page_init(page);
++#ifdef HAVE_ANALYZE_CACHE
++    assert(page->persistent_page_id == 0 && "Initializing over existing persistent_page_id!");
++    page->persistent_page_id = IAF_ID_NEED_REINIT;
++#endif
+ 
+     switch (type) {
+     case WT_PAGE_COL_INT:
+diff --git a/src/btree/bt_read.c b/src/btree/bt_read.c
+index 0a686727eb..08bc7087aa 100644
+--- a/src/btree/bt_read.c
++++ b/src/btree/bt_read.c
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include "wt_internal.h"
++#include "verbose.h"
+ 
+ /*
+  * Define functions that increment histogram statistics for reconstruction of pages with deltas.
+@@ -457,6 +458,14 @@ skip_disk_read:
+         page->disagg_info->old_rec_lsn_max = block_meta.disagg_lsn;
+         page->disagg_info->rec_lsn_max = block_meta.disagg_lsn;
+     }
++#ifdef HAVE_ANALYZE_CACHE
++    assert(page && "Page uninitialized!?!");
++    assert((F_ISSET(session, WT_SESSION_INTERNAL | WT_SESSION_CACHE_CURSORS) ||
++             block_meta.persistent_page_id != 0) &&
++      "ppid uninit?");
++    page->persistent_page_id = block_meta.persistent_page_id;
++#endif
++
+     if (!page_change && instantiate_upd && !WT_IS_HS(session->dhandle))
+         WT_ERR(__wti_page_inmem_updates(session, ref));
+ 
+@@ -752,7 +761,7 @@ skip_evict:
+             page = ref->page;
+             WT_ASSERT(session, page != NULL);
+ 
+-            /*
++            /*   T
+              * Keep track of whether a session is reading leaf pages into the cache. This allows for
+              * the session to decide whether pre-fetch would be helpful. It might not work if a
+              * session has multiple cursors on different tables open, since the operations on
+@@ -772,6 +781,31 @@ skip_evict:
+ 
+             __wt_evict_touch_page(session, page, LF_ISSET(WT_READ_INTERNAL_OP), wont_need);
+ 
++#ifdef HAVE_ANALYZE_CACHE
++            {
++                /* Check if we're in a metadata zone or not. */
++
++                Iaf iaf = S2C(session)->iaf;
++                assert(
++                  page->persistent_page_id != IAF_ID_UNINIT && "Uninitialized persistent_page_id!");
++                if (page->persistent_page_id == IAF_ID_NEED_REINIT) {
++                    page->persistent_page_id = Iaf_grab_id(iaf);
++                }
++                /* If the page has a valid persistent_page_id, write it to the IAF algorithm. This
++                 */
++                /* is used for analyzing cache behavior and eviction patterns. */
++                if (iaf != NULL && page->persistent_page_id != IAF_ID_UNINIT &&
++                  !LF_ISSET(WT_READ_CACHE)) {
++                    bool should_print =
++                      Iaf_write(iaf, (void *)(page->persistent_page_id), page->memory_footprint);
++                    /* Whenever the IAF algorithm indicates that we should print, log the current */
++                    /* state for debugging purposes. */
++                    if (should_print)
++                        __wt_analyze_cache_log(session);
++                }
++            }
++#endif
++
+             /*
+              * Check if we need an autocommit transaction. Starting a transaction can trigger
+              * eviction, so skip it if eviction isn't permitted.
+diff --git a/src/btree/bt_slvg.c b/src/btree/bt_slvg.c
+index 660c75b8e5..cb7db352e6 100644
+--- a/src/btree/bt_slvg.c
++++ b/src/btree/bt_slvg.c
+@@ -420,6 +420,12 @@ __slvg_read(WT_SESSION_IMPL *session, WT_STUFF *ss)
+     uint8_t addr[WT_ADDR_MAX_COOKIE];
+     bool eof, valid;
+ 
++    WT_PAGE_BLOCK_META block_meta_tmp;
++    WT_CLEAR(block_meta_tmp);
++#ifdef HAVE_ANALYZE_CACHE
++    block_meta_tmp.persistent_page_id = IAF_ID_IGNORE;
++#endif
++
+     bm = S2BT(session)->bm;
+     WT_ERR(__wt_scr_alloc(session, 0, &as));
+     WT_ERR(__wt_scr_alloc(session, 0, &buf));
+@@ -442,7 +448,7 @@ __slvg_read(WT_SESSION_IMPL *session, WT_STUFF *ss)
+          *
+          * Report the block's status to the block manager.
+          */
+-        if ((ret = __wt_blkcache_read(session, buf, NULL, addr, addr_size)) == 0)
++        if ((ret = __wt_blkcache_read(session, buf, &block_meta_tmp, addr, addr_size)) == 0)
+             valid = true;
+         else {
+             valid = false;
+@@ -1634,6 +1640,12 @@ __slvg_row_trk_update_start(WT_SESSION_IMPL *session, WT_ITEM *stop, uint32_t sl
+     int cmp;
+     bool found;
+ 
++    WT_PAGE_BLOCK_META block_meta_tmp;
++    WT_CLEAR(block_meta_tmp);
++#ifdef HAVE_ANALYZE_CACHE
++    block_meta_tmp.persistent_page_id = IAF_ID_IGNORE;
++#endif
++
+     btree = S2BT(session);
+     page = NULL;
+     found = false;
+diff --git a/src/btree/bt_vrfy.c b/src/btree/bt_vrfy.c
+index 196a6886b5..172f311f0c 100644
+--- a/src/btree/bt_vrfy.c
++++ b/src/btree/bt_vrfy.c
+@@ -1404,8 +1404,13 @@ __verify_overflow(WT_SESSION_IMPL *session, const uint8_t *addr, size_t addr_siz
+     __wt_verbose_debug3(session, WT_VERB_VERIFY, "read overflow page at: %s",
+       __wt_addr_string(session, addr, addr_size, vs->tmp1));
+ 
++    WT_PAGE_BLOCK_META block_meta_tmp;
++    WT_CLEAR(block_meta_tmp);
++#ifdef HAVE_ANALYZE_CACHE
++    block_meta_tmp.persistent_page_id = IAF_ID_IGNORE;
++#endif
+     /* Read and verify the overflow item. */
+-    WT_RET(__wt_blkcache_read(session, vs->tmp1, NULL, addr, addr_size));
++    WT_RET(__wt_blkcache_read(session, vs->tmp1, &block_meta_tmp, addr, addr_size));
+ 
+     /*
+      * The physical page has already been verified, but we haven't confirmed it was an overflow
+diff --git a/src/cache/cache.c b/src/cache/cache.c
+index 14797e3e2e..b78b4b420a 100644
+--- a/src/cache/cache.c
++++ b/src/cache/cache.c
+@@ -54,6 +54,11 @@ __wt_cache_config(WT_SESSION_IMPL *session, const char *cfg[], bool reconfig)
+     WT_ERR(__wt_config_gets(session, cfg, "cache_overhead", &cval));
+     cache->overhead_pct = (u_int)cval.val;
+ 
++#ifdef HAVE_ANALYZE_CACHE
++    /* The cache size is only known now, so this is the first point the curve can be sized to it. */
++    __wt_analyze_cache_bound(session);
++#endif
++
+ err:
+     F_CLR_ATOMIC_32(conn, WT_CONN_RECONFIGURING_CACHE_POOL);
+     return (ret);
+diff --git a/src/conn/conn_api.c b/src/conn/conn_api.c
+index d29f253ff8..573e8cbf30 100644
+--- a/src/conn/conn_api.c
++++ b/src/conn/conn_api.c
+@@ -3269,6 +3269,10 @@ wiredtiger_open(const char *home, WT_EVENT_HANDLER *event_handler, const char *c
+     WT_RET(__wt_calloc_one(NULL, &conn));
+     conn->iface = stdc;
+ 
++#ifdef HAVE_ANALYZE_CACHE
++    conn->iaf = Iaf_create(WT_IAF_SAMPLING_LOG2, WT_IAF_DEFAULT_MAX_BLOCKS);
++#endif
++
+     /*
+      * Immediately link the structure into the connection structure list: the only thing ever looked
+      * at on that list is the database name, and a NULL value is fine.
+diff --git a/src/conn/conn_open.c b/src/conn/conn_open.c
+index f0b8153532..542485414e 100644
+--- a/src/conn/conn_open.c
++++ b/src/conn/conn_open.c
+@@ -219,6 +219,13 @@ __wti_connection_close(WT_CONNECTION_IMPL *conn)
+     /* Destroy any precompiled configuration. */
+     __wt_conf_compile_discard(session);
+ 
++#ifdef HAVE_ANALYZE_CACHE
++    if (conn->iaf != NULL) {
++        __wt_analyze_cache_log(session);
++        Iaf_destroy(&(conn->iaf));
++    }
++#endif
++
+     /* Destroy the handle. */
+     __wti_connection_destroy(conn);
+ 
+diff --git a/src/include/analyze_cache_inline.h b/src/include/analyze_cache_inline.h
+new file mode 100644
+index 0000000000..04ead22b76
+--- /dev/null
++++ b/src/include/analyze_cache_inline.h
+@@ -0,0 +1,114 @@
++/*-
++ * Copyright (c) 2014-present MongoDB, Inc.
++ * Copyright (c) 2008-2014 WiredTiger, Inc.
++ *	All rights reserved.
++ *
++ * See the file LICENSE for redistribution information.
++ */
++
++#pragma once
++
++#ifdef HAVE_ANALYZE_CACHE
++
++/*
++ * How far past the configured cache size the miss-ratio curve should reach. The point of the curve
++ * is to say whether more cache would help, so it has to extend well beyond the size actually in
++ * use. This is a ceiling rather than a reservation: the curve costs 8 bytes per block of the living
++ * set actually touched, and stops growing there.
++ */
++#define WT_IAF_CACHE_HEADROOM 4
++
++/*
++ * Sample one address in 2^WT_IAF_SAMPLING_LOG2. Sampling divides both the work IAF does per access
++ * and the memory the curve needs by that factor; the cache-size axis is scaled back up when the
++ * curve is emitted, so the reported sizes stay in real blocks either way.
++ */
++#define WT_IAF_SAMPLING_LOG2 2 /* 1 in 4 */
++
++/*
++ * Placeholder bound. conn->iaf has to be created at the top of wiredtiger_open, before the cache
++ * size is known, but __wt_analyze_cache_bound() replaces this from __wt_cache_create() -- still
++ * ahead of the first metadata read -- so no request is ever recorded under it.
++ */
++#define WT_IAF_DEFAULT_MAX_BLOCKS (1000000)
++
++/*
++ * __wt_analyze_cache_bound --
++ *     Re-bound the miss-ratio curve to cover the configured cache size, with headroom. Called once
++ *     the cache size is known, and again on reconfigure if it changes.
++ */
++static WT_INLINE void
++__wt_analyze_cache_bound(WT_SESSION_IMPL *session)
++{
++    WT_CONNECTION_IMPL *conn;
++
++    conn = S2C(session);
++
++    /*
++     * A shared cache reports a size of zero here and is sized by the pool instead; leave the
++     * previous bound in place rather than collapsing the curve to nothing.
++     */
++    if (conn->iaf == NULL || conn->cache_size == 0)
++        return;
++
++    Iaf_set_max_cache_blocks(
++      conn->iaf, (size_t)(conn->cache_size / IAF_BLOCK_SIZE) * WT_IAF_CACHE_HEADROOM);
++}
++
++/*
++ * __wt_analyze_cache_log --
++ *     Dump the IAF miss-ratio curve, prefixed with the cache size the curve should be read at and
++ *     the hit rate WiredTiger actually achieved there. The predicted and the observed numbers are
++ *     emitted in a single message so a reader can validate one against the other without having to
++ *     correlate separate log lines.
++ */
++static WT_INLINE void
++__wt_analyze_cache_log(WT_SESSION_IMPL *session)
++{
++    WT_CONNECTION_IMPL *conn;
++    double hit_rate;
++    uint64_t cache_blocks, curve_blocks;
++    int64_t bytes_inuse, reads, requests;
++    char *iaf_str;
++
++    conn = S2C(session);
++    if (conn->iaf == NULL)
++        return;
++
++    /*
++     * Pages requested is every lookup that found a page in cache or read one in; pages read is the
++     * subset that missed. Both stay zero unless the connection enabled statistics, hence the guard
++     * on the division.
++     */
++    requests = WT_STAT_CONN_READ(conn->stats, cache_pages_requested_internal) +
++      WT_STAT_CONN_READ(conn->stats, cache_pages_requested_leaf);
++    reads = WT_STAT_CONN_READ(conn->stats, cache_read_internal) +
++      WT_STAT_CONN_READ(conn->stats, cache_read_leaf);
++    bytes_inuse = WT_STAT_CONN_READ(conn->stats, cache_bytes_inuse);
++    hit_rate = requests > 0 ? 100.0 * (double)(requests - reads) / (double)requests : 0.0;
++
++    iaf_str = Iaf_stringify(conn->iaf);
++    if (iaf_str == NULL)
++        return;
++
++    /*
++     * The curve's cache-size axis is denominated in IAF_BLOCK_SIZE units, so report the configured
++     * cache size in those units as well as in bytes -- that value is the x coordinate at which the
++     * curve should predict the hit rate reported here. If it lies beyond the largest cache size the
++     * curve can represent then the two numbers cannot be compared at all, so say so rather than
++     * leaving a reader to infer it from the curve's last row.
++     */
++    cache_blocks = (uint64_t)conn->cache_size / IAF_BLOCK_SIZE;
++    curve_blocks = Iaf_max_cache_blocks(conn->iaf);
++
++    __wt_verbose_info(session, WT_VERB_EVICTION,
++      "IAF-SUMMARY cache_bytes=%" PRIu64 ",cache_blocks=%" PRIu64 ",curve_max_blocks=%" PRIu64
++      ",curve_covers_cache=%s,bytes_inuse=%" PRId64 ",pages_requested=%" PRId64
++      ",pages_read=%" PRId64 ",hit_rate_pct=%.4f,stats_enabled=%s\n%s",
++      conn->cache_size, cache_blocks, curve_blocks, cache_blocks <= curve_blocks ? "true" : "false",
++      bytes_inuse, requests, reads, hit_rate, WT_STAT_ENABLED(session) ? "true" : "false", iaf_str);
++
++    Iaf_free_string(iaf_str);
++}
++
++#endif /* HAVE_ANALYZE_CACHE */
+diff --git a/src/include/btmem.h b/src/include/btmem.h
+index 7ac8f87494..2aa092cc3b 100644
+--- a/src/include/btmem.h
++++ b/src/include/btmem.h
+@@ -268,6 +268,9 @@ struct __wt_save_upd {
+  */
+ struct __wt_page_block_meta {
+     uint64_t page_id;
++#ifdef HAVE_ANALYZE_CACHE
++    uint64_t persistent_page_id;
++#endif
+     uint64_t disagg_lsn;
+ 
+     /*
+@@ -873,6 +876,10 @@ struct __wt_page {
+ #else
+ #define WT_SPLIT_PAGE_SAVE_STATE(page, session, e, g)
+ #endif
++
++#ifdef HAVE_ANALYZE_CACHE
++    uint64_t persistent_page_id;
++#endif
+ };
+ 
+ /*
+diff --git a/src/include/connection.h b/src/include/connection.h
+index 6534d4aaf6..396b4b3ca5 100644
+--- a/src/include/connection.h
++++ b/src/include/connection.h
+@@ -8,6 +8,10 @@
+ 
+ #pragma once
+ 
++#ifdef HAVE_ANALYZE_CACHE
++#include "iaf_api.h"
++#endif
++
+ /*******************************************
+  * Global per-process structure.
+  *******************************************/
+@@ -925,6 +929,10 @@ struct __wt_ckpt_eviction_snap {
+ struct __wt_connection_impl {
+     WT_CONNECTION iface;
+ 
++#ifdef HAVE_ANALYZE_CACHE
++    Iaf iaf;
++#endif
++
+     /* For operations without an application-supplied session */
+     wt_shared WT_SESSION_IMPL *default_session;
+     WT_SESSION_IMPL dummy_session;
+diff --git a/src/include/extern.h b/src/include/extern.h
+index 4b455efcb9..4bd463106e 100644
+--- a/src/include/extern.h
++++ b/src/include/extern.h
+@@ -1268,7 +1268,8 @@ extern int __wti_background_compact_server_destroy(WT_SESSION_IMPL *session)
+ extern int __wti_blkcache_map(WT_SESSION_IMPL *session, WT_BLOCK *block, void **mapped_regionp,
+   size_t *lengthp, void **mapped_cookiep) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+ extern int __wti_blkcache_map_read(WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr,
+-  size_t addr_size, bool *foundp) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
++  size_t addr_size, bool *foundp, uint32_t *objectidp)
++  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+ extern int __wti_blkcache_put(WT_SESSION_IMPL *session, WT_ITEM *data, WT_ITEM *deltas,
+   uint32_t num_deltas, WT_PAGE_BLOCK_META *block_meta, const uint8_t *addr, size_t addr_size,
+   bool write) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+diff --git a/src/include/wt_internal.h b/src/include/wt_internal.h
+index 85002fd6c7..d28776cf77 100644
+--- a/src/include/wt_internal.h
++++ b/src/include/wt_internal.h
+@@ -699,6 +699,7 @@ typedef uint64_t wt_timestamp_t;
+ #include "packing_inline.h"
+ #include "serial_inline.h"
+ #include "str_inline.h"
++#include "analyze_cache_inline.h"
+ #include "time_inline.h"
+ 
+ #if defined(__cplusplus)
+diff --git a/src/reconcile/rec_write.c b/src/reconcile/rec_write.c
+index 9cd89cdc1c..4bf8e1c6eb 100644
+--- a/src/reconcile/rec_write.c
++++ b/src/reconcile/rec_write.c
+@@ -10,6 +10,10 @@
+ #include "reconcile_private.h"
+ #include "reconcile_inline.h"
+ 
++#ifdef HAVE_ANALYZE_CACHE
++#include "iaf_api.h"
++#endif
++
+ static int __rec_cleanup(WT_SESSION_IMPL *, WTI_RECONCILE *);
+ static int __rec_destroy(WT_SESSION_IMPL *, void *);
+ static int __rec_destroy_session(WT_SESSION_IMPL *);
+@@ -2449,6 +2453,9 @@ __rec_write_image(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WTI_REC_CHUNK *chu
+ {
+     WT_MULTI *multi;
+     WT_PAGE *page;
++#ifdef HAVE_ANALYZE_CACHE
++    WT_PAGE_BLOCK_META block_meta_init;
++#endif
+     WT_PAGE_BLOCK_META *block_meta;
+ 
+     page = r->page;
+@@ -2474,8 +2481,29 @@ __rec_write_image(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WTI_REC_CHUNK *chu
+         } else
+             __wt_page_block_meta_assign(session, multi->block_meta);
+     }
+-    WT_RET(__rec_write(session, &chunk->image, multi->block_meta, addr, addr_sizep,
+-      compressed_sizep, false, F_ISSET(r, WT_REC_CHECKPOINT), false));
++#ifdef HAVE_ANALYZE_CACHE
++    /* assert(page->persistent_page_id != IAF_ID_UNINIT && "Uninitialized persistent page id!"); */
++    if (multi->block_meta == NULL) {
++        __wt_page_block_meta_assign(session, &block_meta_init);
++        block_meta = &block_meta_init;
++    } else {
++        block_meta = multi->block_meta;
++    }
++    // On a split, generate a new page id for everyone. Otherwise, keep the same page.
++    if (last_block && r->multi_next == 1) {
++        if (page->persistent_page_id == IAF_ID_NEED_REINIT ||
++            page->persistent_page_id == IAF_ID_UNINIT) {
++            page->persistent_page_id = Iaf_grab_id(S2C(session)->iaf);
++        }
++        block_meta->persistent_page_id = page->persistent_page_id;
++    } else {
++        block_meta->persistent_page_id = Iaf_grab_id(S2C(session)->iaf);
++    }
++#else
++    block_meta = multi->block_meta;
++#endif
++    WT_RET(__rec_write(session, &chunk->image, block_meta, addr, addr_sizep, compressed_sizep,
++      false, F_ISSET(r, WT_REC_CHECKPOINT), false));
+ 
+     if (F_ISSET(r->ref, WT_REF_FLAG_INTERNAL))
+         WT_STAT_CONN_DSRC_INCR(session, rec_page_full_image_internal);
+diff --git a/src/utilities/CMakeLists.txt b/src/utilities/CMakeLists.txt
+index 47dea11e9e..62a63b1b69 100644
+--- a/src/utilities/CMakeLists.txt
++++ b/src/utilities/CMakeLists.txt
+@@ -36,6 +36,10 @@ if(ENABLE_ANTITHESIS)
+     target_link_libraries(wt wt::voidstar)
+ endif()
+ 
++if(HAVE_ANALYZE_CACHE)
++    target_link_libraries(wt IAF)
++endif()
++
+ # Our test suite expects `wt` to sit at the top level build directory.
+ # Set the output binary location to the top level directory for backwards
+ # compatibility.
+diff --git a/test/catch2/block/api/test_block_api_write.cpp b/test/catch2/block/api/test_block_api_write.cpp
+index e9cede1fac..1522d36523 100644
+--- a/test/catch2/block/api/test_block_api_write.cpp
++++ b/test/catch2/block/api/test_block_api_write.cpp
+@@ -103,6 +103,7 @@ validate_write_block(WT_BM *bm, const std::shared_ptr<mock_session> &session, WT
+     uint32_t objectid, size, checksum;
+     REQUIRE(__wt_block_addr_unpack(session->get_wt_session_impl(), bm->block, cookie.addr.data(),
+               cookie.size, &objectid, &offset, &size, &checksum) == 0);
++    objectid = 0;
+     REQUIRE(offset % std::stoi(ALLOCATION_SIZE) == 0);
+     REQUIRE(size == write_buf->memsize);
+     REQUIRE(checksum == blk->checksum);
+diff --git a/test/catch2/block/unit/test_block_addr.cpp b/test/catch2/block/unit/test_block_addr.cpp
+index 1c5e467d24..6d6acbf297 100644
+--- a/test/catch2/block/unit/test_block_addr.cpp
++++ b/test/catch2/block/unit/test_block_addr.cpp
+@@ -82,6 +82,7 @@ test_unpack_addr_cookie(const uint8_t *begin, WT_BLOCK *block, size_t addr_size,
+     wt_off_t offset;
+     REQUIRE(__wt_block_addr_unpack(
+               nullptr, block, begin, addr_size, &obj_id, &offset, &size, &checksum) == 0);
++    objectid = 0;
+     check_block_addr(offset, pack_offset, size, pack_size, checksum, pack_checksum);
+ }
+ 
+diff --git a/test/cppsuite/CMakeLists.txt b/test/cppsuite/CMakeLists.txt
+index f4af3e0e38..30bf58a899 100644
+--- a/test/cppsuite/CMakeLists.txt
++++ b/test/cppsuite/CMakeLists.txt
+@@ -33,6 +33,10 @@ add_library(cppsuite_test_harness STATIC
+     src/util/options_parser.cpp
+ )
+ 
++if(HAVE_ANALYZE_CACHE)
++    target_link_libraries(cppsuite_test_harness PUBLIC IAF::IAF)
++endif()
++
+ target_include_directories(cppsuite_test_harness PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+ target_compile_options(
+     cppsuite_test_harness
