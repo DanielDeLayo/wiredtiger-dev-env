@@ -22,9 +22,9 @@ Line 1 of the CSV is metadata, **not** column headers:
 
 | field | meaning |
 |---|---|
-| `total_requests` | denominator for hit rate (sampled and extrapolated) |
+| `total_requests` | sampled access count, multiplied by the sampling rate. Used only to form the miss curve; **never** the denominator |
 | `max_cache_size` | largest cache size present in this curve, in blocks |
-| `raw_accesses` | every page-in seen, including unsampled ones and duplicates |
+| `raw_accesses` | exact access count, including unsampled accesses and duplicates. The denominator of the miss-ratio curve |
 
 Then `Cache Size,Hits` and the rows. `pandas.read_csv(path, skiprows=1)` is the right call.
 
@@ -52,14 +52,17 @@ Consequences worth knowing:
 
 ## Computing the curve
 
-The `Hits` column is a **success function**: cumulative hits achievable at that cache size or
-smaller. It is monotonically non-decreasing.
+    miss_curve = total_requests - hits          # misses at each cache size
+    mrc        = miss_curve / raw_accesses      # miss-ratio curve
 
-    hit_ratio  = hits / total_requests          # total_requests from the metadata line
-    miss_ratio = 1.0 - hit_ratio
+`hits` is the `Hits` column; `total_requests` and `raw_accesses` are from the metadata line.
+The miss curve is non-increasing in cache size.
 
-**Rows are sparse.** A row is emitted only when the cache size has grown 5% or the hit count
-has grown 1% (with a floor of one hit) since the last row, so spacing is geometric, not
+Do **not** compute `1 - hits / total_requests`. It agrees with the above only when sampling is
+off (`total_requests == raw_accesses`); see "Sampling".
+
+**Rows are sparse.** A row is emitted only when the cache size has grown 5% or `Hits` has
+grown 1% (minimum one) since the last row, so spacing is geometric, not
 uniform, and most cache sizes are absent. Treat it as a step function: to read a value at an
 arbitrary size, take the last row at or below it (`previous`-style interpolation). Do not
 assume row index relates to cache size, and do not linearly interpolate across a wide gap and
@@ -67,14 +70,27 @@ present it as measured.
 
 ## Sampling
 
-Sampling is on by default at 1 in 4 (`WT_IAF_SAMPLING_LOG2 = 2`). **Both axes are already
-corrected** before the CSV is written -- the cache-size axis is scaled back to real blocks and
-the hit counts are extrapolated. `total_requests` is likewise extrapolated.
+Sampling is on by default at 1 in 4 (`WT_IAF_SAMPLING_LOG2 = 2`). The CSV is already
+rescaled: `Cache Size` is in real blocks, and `total_requests` and `Hits` are sampled counts
+multiplied by 4. Do not rescale again; multiplying by 4 a second time is the likeliest mistake.
 
-Apply no further correction. Multiplying by 4 again is the most likely mistake here.
+Sampling selects whole addresses. A page that draws a large share of accesses -- a heavy
+hitter, such as the root -- is entirely in the sample or entirely out, and with few such pages
+this does not average out. `total_requests` shifts by the page's scaled access count, and can
+differ from `raw_accesses` by far more than a few percent.
 
-Expect `total_requests` to differ from `raw_accesses` by a few percent; that is extrapolation
-error, not a bug.
+**The miss curve is invariant to this.** Once the cache holds the heavy hitter between its
+accesses, it misses only on its first access, so it adds the same amount to `total_requests`
+and to `Hits` and cancels from `total_requests - hits`.
+
+**The miss-ratio curve must divide by the expected access count, not the sampled one.**
+`raw_accesses` counts every access, sampled or not, so it is exactly the expected value of
+`total_requests`:
+
+    mrc = (total_requests - hits) / raw_accesses
+
+Dividing by `total_requests` puts the heavy hitter's sampling error into every point of the
+curve.
 
 ## Multiple dumps in one run
 
@@ -95,15 +111,26 @@ correlating separate log lines:
 - `stats_enabled=false` means the connection was opened without `statistics=(fast)`, so
   `hit_rate_pct`, `pages_requested` and `pages_read` are all zero and must be ignored.
 
-**Expect the curve to predict a higher hit rate than WiredTiger achieves.** In a local
-wtperf run the curve predicted 85.0% where WiredTiger measured 72.4%. That gap is expected,
+**Expect the curve to predict a lower miss ratio than WiredTiger achieves.** In a local
+wtperf run the curve predicted 0.150 where WiredTiger measured 0.276. That gap is expected,
 not an error: IAF models optimal LRU over page accesses, while the real cache also holds
 internal pages, update structures and per-page overhead, and does not use pure LRU. Treat a
-gap of roughly 10-15 points as normal. A gap in the *other* direction (observed better than
-predicted) is suspicious and worth investigating.
+gap of roughly 10-15 points as normal. A gap in the *other* direction (observed miss ratio
+below the prediction) is suspicious and worth investigating.
 
-## Existing scripts
+## A script that does all of this
 
-`../scripts/plot_mrc_mongo.py` and its siblings already implement the above -- 256-byte
-scaling, `skiprows=1`, and miss ratio against the metadata denominator. Prefer extending them
-to writing a new parser.
+`plot_mrc.py`, next to this file, is self-contained (stdlib + matplotlib, no pandas). Point it
+at a WiredTiger log:
+
+    python3 plot_mrc.py wiredtiger.log mrc.png          # last dump only
+    python3 plot_mrc.py wiredtiger.log mrc.png --all    # overlay every dump
+
+It converts blocks to bytes, computes the miss-ratio curve as above, draws the sparse rows as
+a step function, and adds two reference marks so the prediction and the observation can be
+read off one figure:
+a vertical line at `cache_bytes` and a horizontal line at the miss ratio implied by
+`hit_rate_pct`. It also warns when `curve_covers_cache=false`.
+
+The connection must be opened with `verbose=[eviction:0]` (or higher) or no dumps are emitted
+and the script will tell you so.

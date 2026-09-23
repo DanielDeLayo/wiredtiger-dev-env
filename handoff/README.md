@@ -1,7 +1,12 @@
 # IAF cache-analysis update
 
 Two patches, one per upstream repo. Both verified to apply cleanly with `git apply --check`
-against the revisions below.
+against the revisions below. Also here:
+
+- `MRC-GUIDE.md` -- how to read and plot the curve, including the 256-byte quantization.
+  Written for an agent working on your side.
+- `plot_mrc.py` -- self-contained plotter: point it at a WiredTiger log and it pulls out
+  every `IAF-SUMMARY` dump. Stdlib + matplotlib only.
 
 ## 1. Increment-and-Freeze
 
@@ -91,7 +96,11 @@ at `pareto=20` emits `IAF-SUMMARY` dumps whose curve covers the configured cache
 
 - **Sampling is on: 1 in 4** (`WT_IAF_SAMPLING_LOG2` in `analyze_cache_inline.h`). The
   cache-size axis is scaled back up when the curve is emitted, so reported sizes are still
-  real blocks. Memory for the curve drops 4x.
+  real blocks. Memory for the curve drops 4x. Sampling selects whole addresses, so a
+  heavy-hitter page (the root, a hot record) is entirely in or out of the sample, and
+  `total_requests` shifts by its scaled access count. The miss curve, `total_requests - Hits`,
+  is invariant to this. The miss-ratio curve divides it by `raw_accesses`, the exact access
+  count, never by `total_requests`. Details in `MRC-GUIDE.md`; `plot_mrc.py` does this.
 
 - **Each dump is now prefixed with a summary line** so the prediction and the observation can
   be checked against each other without correlating separate log lines:
