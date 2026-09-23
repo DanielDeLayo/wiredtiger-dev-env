@@ -98,11 +98,20 @@ misses, so the miss curve is close to `total_requests` and the ratio close to
 share of accesses. This is expected; do not clamp it. It disappears once the cache holds the
 heavy hitters.
 
+**Sampling is least accurate at the two ends of the curve.** At very small cache sizes the
+sampled cache holds only a handful of pages and the heavy hitters are not yet resident, so the
+curve mostly reflects which pages happened to be sampled; in synthetic tests at 1-in-4 that
+meant errors of a few percentage points below ~5 MB. As the cache approaches the working set,
+the few remaining misses come from few sampled pages and the curve moves in steps, so the
+absolute error stays under about a point but the relative error can be large.
+
 ## Multiple dumps in one run
 
-Each dump is **cumulative over the whole run so far**, not a delta. For a final MRC, use the
-last dump. The sequence of dumps is useful for checking whether the curve has converged --
-if the last few differ materially, the run was too short.
+Each dump is **cumulative since the connection was opened**, not a delta. IAF state does not
+survive a close: a harness that populates, closes and reopens (wtperf does) produces two
+independent sequences, and `raw_accesses` drops at the boundary. For a final MRC, use the last
+dump of the connection you care about. Within one connection, the sequence of dumps shows
+whether the curve has converged -- if the last few differ materially, the run was too short.
 
 ## Validating against WiredTiger's own numbers
 

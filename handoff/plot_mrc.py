@@ -16,8 +16,9 @@ Each dump in the log looks like this -- one verbose line, then a bare CSV:
 The miss-ratio curve is the miss curve, total_requests - Hits, divided by
 raw_accesses. See MRC-GUIDE.md, "Sampling".
 
-Dumps are cumulative, so the last one covers the whole run. By default only the
-last is plotted; --all overlays every dump so you can see the curve converge.
+Dumps are cumulative within a connection, so the last one covers the last
+connection's whole run. By default only the last is plotted; --all overlays
+every dump so you can see the curve converge.
 
 Only stdlib + matplotlib. No pandas.
 """
@@ -110,7 +111,8 @@ def main():
     chosen = dumps if plot_all else [dumps[-1]]
 
     fig, ax = plt.subplots(figsize=(9, 5.5))
-    for i, d in enumerate(chosen):
+    # Number dumps by their position in the log, not in the plotted subset.
+    for i, d in enumerate(chosen, start=len(dumps) - len(chosen)):
         # The CSV is sparse: rows are only emitted where the curve moves, so it
         # is a step function. Draw it as one rather than interpolating.
         gb = [s * BLOCK / (1024 ** 3) for s in d["sz"]]

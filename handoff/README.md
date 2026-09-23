@@ -16,11 +16,30 @@ Vendored via `src/third_party/increment_and_freeze/scripts/import.sh`, which pin
 
 Bump it and re-run the script:
 
-    REVISION="3e23d8682ae98efe646dfb8b7764aeaa037104ea"   # new
+    REVISION="36d125c34aba4e5b3d232603555e0d6007b3eb41"   # new
 
-No `SRCS`/`HDRS` changes are needed -- every modified file is already in those lists and no
-files were added, so a straight re-import picks everything up. `iaf-update.patch` is included
-if you would rather apply the delta directly (base: `f535b31`).
+No files were added, so a straight re-import picks everything up without `SRCS`/`HDRS`
+changes. The delta also touches `ost_cache_sim.{h,cc}`, `container_cache_sim.h`,
+`sim_factory.h` and `unit_tests.cc`; if your vendored copy does not carry those, those hunks
+simply do not apply to you. `iaf-update.patch` is included if you would rather apply the
+delta directly (base: `f535b31`, 15 files, +374/-101).
+
+The update also corrects the curve for pages wider than one 256-byte block, which is every
+WiredTiger page:
+
+- **Page sizes that change.** A page is now counted at its latest size.
+- **Back-to-back repeats of a wide page** were counted as hits at a 1-block cache. They are
+  now hits once the cache holds the whole page.
+- **Sampling scaled a page's own size.** Sampled distances were multiplied by the rate in
+  full, including the reused page itself, overstating every distance by `(rate - 1) x page
+  size` -- about 4 MB per reuse for a 32 KiB page at 1-in-128. The estimate is now
+  `rate x (other sampled pages) + own size`. With 1-block pages nothing changes.
+- **`BoundedIAF` dropped real hits** when pages shrank, by trimming the hits vector to the
+  living set instead of to the configured bound.
+- **A zero-byte `Iaf_write`** could freeze at distance 0; it now counts as one block.
+
+`unit_tests.cc` checks the exact and sampled paths against brute force on traces with
+variable, changing page sizes.
 
 Your hand-written `BUILD.bazel` for the vendored copy is unaffected. Upstream's own
 `BUILD.bazel` also changed in this range (correct `@rules_cc//cc:cc_library.bzl` load, and
@@ -119,6 +138,10 @@ at `pareto=20` emits `IAF-SUMMARY` dumps whose curve covers the configured cache
 ## Caveats
 
 - Measurements above are wtperf on macOS/arm64, single machine. Not YCSB on mongod.
+- The WiredTiger build and wtperf verification above were done against IaF `3e23d86`. The
+  later commits -- the `should_sample` hash change, and the wide-page and sampling
+  corrections in `36d125c` -- were validated by IaF's unit tests and synthetic page traces
+  only, not on a WiredTiger run.
 - The concurrency change was validated by stress testing and curve-equivalence A/B only.
   ThreadSanitizer is broken on the machine this was developed on (a TSAN hello-world
   segfaults), so it has **not** been sanitizer-verified. Worth a TSAN run on Linux.

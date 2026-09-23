@@ -61,16 +61,24 @@ partitions is sampling error alone. Rate 0 (1-in-1) is the exact curve.
         done; wait
     done
 
-    # Zipf, rates 1-in-1 through 1-in-8, every partition
+    # 1-in-128, partition 0 only (drawn as a line, not in the partition-spread panels)
+    /tmp/samp_pareto       7 0 30000000 29 200000000 1200000 > $SP/curves_pareto/s7_p0.csv
+    /tmp/samp_pareto       7 0  6000000 29 200000000  250000 > $SP/curves_pareto_in/s7_p0.csv
+    /tmp/samp_pareto_nohot 7 0 30000000 29 200000000 1200000 > $SP/curves_pareto_nohot/s7_p0.csv
+
+    # Zipf, rates 1-in-1 through 1-in-8 and 1-in-128, every partition
     for s in 0 1 2 3; do
         for p in $(seq 0 $(( (1<<s) - 1 ))); do
             /tmp/samp_part $s 16000000 3000000 $p > $SP/curves_part/s${s}_p${p}.csv &
         done; wait
     done
+    (cd $SP && seq 0 127 | xargs -P 8 -n 1 sh -c \
+        '/tmp/samp_part 7 16000000 3000000 "$0" > curves_part/s7_p"$0".csv')
 
     python3 plot_pareto.py     $SP               ../../plots   # the three sampling_pareto20_* figures
     python3 plot_partitions.py $SP/curves_part   ../../plots/sampling_partitions.png
     python3 plot_collapse.py   $SP/curves_part   ../../plots/sampling_collapse.png
+    python3 plot_convergence.py $SP              ../../plots   # sampling_convergence{,_summary}.png
 
 The caps only need to cover the trace's footprint: a larger cap gives the same curve.
 
@@ -131,11 +139,16 @@ a far larger single-address concentration than the synthetic hot record. It is e
 out of the sample in the same way, and cancels from the miss curve at any cache that holds it
 between accesses. Not yet measured end to end.
 
-**On Zipf, the rate matters only below ~1 MiB.** Peak error is 4.9pp at 1-in-2, 6.6pp at
+**On Zipf, the rate matters only below ~1 MiB.** Peak error is 5.0pp at 1-in-2, 6.6pp at
 1-in-4 and 4.0pp at 1-in-8, at a few sampled blocks of residency. Above ~1 MiB every rate is
-within about 1pp, and above 1 GiB the RMS error is 0.33pp, 0.30pp and 0.23pp. The hash change
-moved which partition is unlucky but not the spread (RMS over partitions ~0.4pp above 1 MiB
-either way). Divided by `total_requests`, the rates stayed separated out to the largest caches.
+within about 0.5pp, and above 1 GiB the RMS error is 0.09pp, 0.06pp and 0.07pp. The hash change
+moved which partition is unlucky but not the spread. Divided by `total_requests`, the rates
+stayed separated out to the largest caches.
+
+**At 1-in-128 on Zipf the partition you draw dominates.** Across all 128 partitions the mean
+tracks the exact curve (0.13pp mean offset above 10 MiB, 0.05pp above 1 GiB), but the RMS over
+partitions is 0.49pp above 10 MiB and 0.24pp above 1 GiB. Partition 0 has 0.30pp mean error
+above 10 MiB and 0.10pp above 1 GiB.
 
 ## Caveats
 

@@ -13,8 +13,10 @@ def load(d, s, p):
     return _common.load("%s/%s/s%d_p%d.csv" % (SP, d, s, p))
 
 def analyse(d, label, cache_gb, data_gb, fname):
-    rates = [0, 1, 2, 3, 4]
-    curves = {(s, p): load(d, s, p) for s in rates for p in range(1 << s)}
+    rates = [0, 1, 2, 3, 4, 7]          # log2 rates drawn as partition-0 lines
+    swept = [0, 1, 2, 3, 4]             # rates run at every partition
+    curves = {(s, p): load(d, s, p) for s in swept for p in range(1 << s)}
+    curves.update({(s, 0): load(d, s, 0) for s in rates if s not in swept})
     top   = min(c[0][-1] for c in curves.values())
     grid  = np.unique(np.round(np.logspace(0, np.log10(top), 4000)).astype(np.int64))
     miss  = {k: miss_at(*v, grid) for k, v in curves.items()}
@@ -22,7 +24,7 @@ def analyse(d, label, cache_gb, data_gb, fname):
     exact = miss[(0, 0)]
 
     fig, axes = plt.subplots(1, 3, figsize=(19, 5.4))
-    colors = {0:"#111111", 1:"#1f77b4", 2:"#d62728", 3:"#2ca02c", 4:"#9467bd"}
+    colors = {0:"#111111", 1:"#1f77b4", 2:"#d62728", 3:"#2ca02c", 4:"#9467bd", 7:"#8c564b"}
 
     ax = axes[0]
     for s in rates:

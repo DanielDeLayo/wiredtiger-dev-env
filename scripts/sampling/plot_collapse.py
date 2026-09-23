@@ -23,7 +23,7 @@ from _common import BLOCK, common_grid, load_dir, miss_at
 
 CURVES = sys.argv[1]
 OUT = sys.argv[2] if len(sys.argv) > 2 else "sampling_collapse.png"
-RATES = [1, 2, 3]
+RATES = [1, 2, 3, 7]
 
 curves = {s: load_dir(CURVES, s, 0) for s in [0] + RATES}
 grid = common_grid(list(curves.values()))
@@ -32,7 +32,7 @@ mb = grid * BLOCK / (1024 * 1024)
 exact = miss[0]
 err = {s: np.abs(miss[s] - exact) * 100 for s in RATES}
 
-colors = {1: "#1f77b4", 2: "#d62728", 3: "#2ca02c"}
+colors = {1: "#1f77b4", 2: "#d62728", 3: "#2ca02c", 7: "#8c564b"}
 
 
 def smooth(y, k=41):
