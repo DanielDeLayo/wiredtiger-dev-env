@@ -138,10 +138,8 @@ at `pareto=20` emits `IAF-SUMMARY` dumps whose curve covers the configured cache
 ## Caveats
 
 - Measurements above are wtperf on macOS/arm64, single machine. Not YCSB on mongod.
-- The WiredTiger build and wtperf verification above were done against IaF `3e23d86`. The
-  later commits -- the `should_sample` hash change, and the wide-page and sampling
-  corrections in `36d125c` -- were validated by IaF's unit tests and synthetic page traces
-  only, not on a WiredTiger run.
+- The `HAVE_ANALYZE_CACHE=1` build and a wtperf run (`pareto=20`, 3M records, 1.6 GB cache,
+  8 readers) were verified against IaF `36d125c`. The stock build does not link IaF.
 - The concurrency change was validated by stress testing and curve-equivalence A/B only.
   ThreadSanitizer is broken on the machine this was developed on (a TSAN hello-world
   segfaults), so it has **not** been sanitizer-verified. Worth a TSAN run on Linux.

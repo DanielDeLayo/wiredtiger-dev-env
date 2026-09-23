@@ -127,11 +127,11 @@ correlating separate log lines:
   `hit_rate_pct`, `pages_requested` and `pages_read` are all zero and must be ignored.
 
 **Expect the curve to predict a lower miss ratio than WiredTiger achieves.** In a local
-wtperf run the curve predicted 0.150 where WiredTiger measured 0.276. That gap is expected,
-not an error: IAF models optimal LRU over page accesses, while the real cache also holds
-internal pages, update structures and per-page overhead, and does not use pure LRU. Treat a
-gap of roughly 10-15 points as normal. A gap in the *other* direction (observed miss ratio
-below the prediction) is suspicious and worth investigating.
+wtperf run (`pareto=20`, 3M records, 1.6 GB cache) the curve predicted 0.027 where WiredTiger
+measured 0.044. That gap is expected, not an error: IAF models LRU over page accesses, while
+the real cache also holds update structures and per-page overhead, and does not use pure
+LRU. How large the gap is depends on the workload. A gap in the *other* direction (observed
+miss ratio below the prediction) is suspicious and worth investigating.
 
 ## A script that does all of this
 
