@@ -92,6 +92,12 @@ and to `Hits` and cancels from `total_requests - hits`.
 Dividing by `total_requests` puts the heavy hitter's sampling error into every point of the
 curve.
 
+**The miss-ratio curve can exceed 1 at the smallest cache sizes.** There nearly every access
+misses, so the miss curve is close to `total_requests` and the ratio close to
+`total_requests / raw_accesses`, which is above 1 whenever the sample drew more than its
+share of accesses. This is expected; do not clamp it. It disappears once the cache holds the
+heavy hitters.
+
 ## Multiple dumps in one run
 
 Each dump is **cumulative over the whole run so far**, not a delta. For a final MRC, use the
