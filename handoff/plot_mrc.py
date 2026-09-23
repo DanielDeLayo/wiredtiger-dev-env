@@ -13,9 +13,8 @@ Each dump in the log looks like this -- one verbose line, then a bare CSV:
     2,1226176
     ...
 
-The miss ratio is (total_requests - hits) / raw_accesses, not 1 - hits/total_requests.
-The miss curve is invariant to sampling; the ratio must divide it by the expected
-access count, which raw_accesses is. See the comment on BLOCK below.
+The miss-ratio curve is the miss curve, total_requests - Hits, divided by
+raw_accesses. See MRC-GUIDE.md, "Sampling".
 
 Dumps are cumulative, so the last one covers the whole run. By default only the
 last is plotted; --all overlays every dump so you can see the curve converge.
@@ -32,13 +31,6 @@ import matplotlib.pyplot as plt
 # IAF quantizes the cache-size axis to 256-byte blocks. A "Cache Size" of N in
 # the CSV means N * 256 bytes. Sampling is already corrected for in the dump --
 # the emitted sizes are real blocks, not sampled ones.
-#
-# The miss curve is invariant to sampling; the hit curve is not. When sampling,
-# total_requests and Hits are the sampled counts scaled up, so a heavy hitter
-# landing in (or out of) the sampled partition inflates (or deflates) both by
-# the same amount -- it is nearly always a hit -- and it cancels out of
-# total_requests - hits. The miss-ratio curve must divide that miss curve by the
-# expected access count, which raw_accesses is exactly, never by total_requests.
 BLOCK = 256
 
 SUMMARY = re.compile(r"IAF-SUMMARY (.*)")
@@ -94,6 +86,7 @@ def parse(path):
 
 
 def miss_ratio(hits, total, raw):
+    # Never divide by total: it depends on which heavy hitters were sampled.
     return [(total - h) / raw for h in hits]
 
 

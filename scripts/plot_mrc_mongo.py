@@ -43,15 +43,19 @@ if os.path.exists(RESULTS_DIR):
         
         with open(path, 'r') as f:
             meta_line = f.readline().strip()
+        # Header: total_requests,curve_blocks,raw_accesses. Miss-ratio curve = miss curve
+        # (total_requests - hits) / raw_accesses. See handoff/MRC-GUIDE.md, "Sampling".
         try:
-            total_accesses = float(meta_line.split(',')[0])
+            meta = meta_line.split(',')
+            total_accesses = float(meta[0])
+            raw_accesses = float(meta[2]) if len(meta) > 2 else total_accesses
         except:
-            total_accesses = np.max(hits)
-            
-        if total_accesses == 0:
+            total_accesses = raw_accesses = np.max(hits)
+        
+        if raw_accesses == 0:
             continue
-            
-        miss_ratios = 1.0 - (hits / total_accesses)
+        
+        miss_ratios = (total_accesses - hits) / raw_accesses
         cache_sizes_mb = (cache_sizes_pages * PAGE_SIZE_BYTES) / (1024 * 1024)
         
         label = f"IAF ({hist_file.replace('.hist','')})"
