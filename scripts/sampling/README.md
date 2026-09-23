@@ -79,28 +79,46 @@ The caps only need to cover the trace's footprint: a larger cap gives the same c
 **Dividing by `raw_accesses` removes the hot-record error.** Divided by `total_requests`, the
 out_of_cache miss-ratio curve had ~2.3pp mean error at every rate, almost all from one page:
 `testutil_pareto()` clamps its ~2.7% out-of-range draws to record 0 (per the comment in
-`test/utility/misc.c`), that record's page hashes into **partition 2** at 1-in-4, and
-production ships partition 0. The page's absence shifts `total_requests` but not the miss
+`test/utility/misc.c`), that record's page hashes into **partition 1** at 1-in-4 (partition 2
+under the old hash), and production ships partition 0. The page's absence shifts `total_requests` but not the miss
 curve, so with `raw_accesses` as the denominator the error falls to that of the trace with the
 hot record removed:
 
     out_of_cache, partition 0     max err    mean err    at 16 GB
-      1-in-2                       2.610pp     0.097pp    +0.061pp
-      1-in-4  (shipped)            2.627pp     0.093pp    -0.061pp
-      1-in-8                       2.577pp     0.128pp    +0.090pp
-      1-in-16                      2.549pp     0.147pp    +0.082pp
+      1-in-2                       2.614pp     0.099pp    +0.053pp
+      1-in-4  (shipped)            2.638pp     0.086pp    -0.173pp
+      1-in-8                       2.675pp     0.090pp    +0.198pp
+      1-in-16                      2.650pp     0.083pp    -0.181pp
 
     same trace, hot record removed (samp_pareto_nohot)
-      1-in-2                       0.931pp     0.025pp    +0.030pp
-      1-in-4                       0.642pp     0.078pp    -0.050pp
-      1-in-8                       0.867pp     0.094pp    -0.023pp
+      1-in-2                       0.655pp     0.069pp    +0.212pp
+      1-in-4                       0.509pp     0.079pp    -0.160pp
+      1-in-8                       0.760pp     0.051pp    +0.151pp
 
-    divided by total_requests instead (out_of_cache, partition 0)
+    divided by total_requests instead (out_of_cache, partition 0, old hash)
       1-in-4                       2.739pp     2.342pp    +0.985pp
 
 The ~2.6pp max is at caches below ~5 MB, which cannot hold the hot page between its
 accesses; there its accesses are misses and do not cancel. Above ~5 MB the error is within
-0.1pp, except for up to 0.8pp of step noise near 16 GB.
+0.1pp on average, with up to 0.9pp of step noise near 16 GB.
+
+**The partition hash was a comb; it now uses the top bits.** `should_sample` used to take the
+low bits of the high word of `prime * addr`, i.e. `floor(addr * alpha) mod S` with
+`alpha = prime / 2^64 = 0.71601`. Over consecutive page ids that is a fixed comb, whose
+selection has spectral lines at `j * alpha / S` for `j = 1..S-1`. Page weights with periodic
+structure at one of those frequencies alias into a fixed offset: in_cache (6M records) has a
+line at `alpha / 8`, which alone put +0.49pp into partition 0 at 1-in-8. Taking the top bits of
+the low word, `(prime * addr mod 2^64) >> (64 - log2 S)`, keeps the even split of pages across
+partitions but has one frequency, `alpha`, instead of S-1. Mean error over caches >= 5 MB:
+
+    in_cache, RMS over partitions    old hash    top bits
+      1-in-4                          0.088pp     0.093pp
+      1-in-8                          0.505pp     0.124pp
+      1-in-16                         0.510pp     0.159pp
+
+What remains is the residual weight imbalance of the sampled pages: at cache sizes where they
+miss, the miss curve is off by the partition's over- or under-draw of non-heavy accesses.
+`sample_seed` is still unused, so every run selects the same pages.
 
 **Page-level skew is far flatter than the record-level distribution suggests.** `scramble=true`
 plus ~29 records per 32 KiB leaf page averages the Pareto weights away: the top 20% of pages
@@ -113,11 +131,11 @@ a far larger single-address concentration than the synthetic hot record. It is e
 out of the sample in the same way, and cancels from the miss curve at any cache that holds it
 between accesses. Not yet measured end to end.
 
-**On Zipf, the rate matters only below ~1 MiB.** Peak error grows with the rate (2.3pp at
-1-in-2, 7.5pp at 1-in-4, 16.4pp at 1-in-8) and sits at a few sampled blocks of residency.
-Above ~1 MiB every rate is within 0.2-0.9pp, and above 1 GiB the RMS error is 0.29pp,
-0.29pp and 0.22pp. Divided by `total_requests`, the rates stayed separated out to the
-largest caches.
+**On Zipf, the rate matters only below ~1 MiB.** Peak error is 4.9pp at 1-in-2, 6.6pp at
+1-in-4 and 4.0pp at 1-in-8, at a few sampled blocks of residency. Above ~1 MiB every rate is
+within about 1pp, and above 1 GiB the RMS error is 0.33pp, 0.30pp and 0.23pp. The hash change
+moved which partition is unlucky but not the spread (RMS over partitions ~0.4pp above 1 MiB
+either way). Divided by `total_requests`, the rates stayed separated out to the largest caches.
 
 ## Caveats
 
