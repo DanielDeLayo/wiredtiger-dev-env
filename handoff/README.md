@@ -1,12 +1,13 @@
 # IAF cache-analysis update
 
 Two patches, one per upstream repo. Both verified to apply cleanly with `git apply --check`
-against the revisions below. Also here:
+against the revisions below. The plotting tools live in the Increment-and-Freeze repo under
+`tools/` (branch `sampling`):
 
-- `MRC-GUIDE.md` -- how to read and plot the curve, including the 256-byte quantization.
-  Written for an agent working on your side.
-- `plot_mrc.py` -- self-contained plotter: point it at a WiredTiger log and it pulls out
-  every `IAF-SUMMARY` dump. Stdlib + matplotlib only.
+- `tools/MRC-GUIDE.md` -- how to read and plot the curve, including the 256-byte
+  quantization. Written for an agent working on your side.
+- `tools/plot_mrc.py` -- self-contained plotter: point it at a WiredTiger log or a mongod JSON
+  log and it pulls out every `IAF-SUMMARY` dump. Stdlib + matplotlib only.
 
 ## 1. Increment-and-Freeze
 
@@ -119,7 +120,7 @@ at `pareto=20` emits `IAF-SUMMARY` dumps whose curve covers the configured cache
   heavy-hitter page (the root, a hot record) is entirely in or out of the sample, and
   `total_requests` shifts by its scaled access count. The miss curve, `total_requests - Hits`,
   is invariant to this. The miss-ratio curve divides it by `raw_accesses`, the exact access
-  count, never by `total_requests`. Details in `MRC-GUIDE.md`; `plot_mrc.py` does this.
+  count, never by `total_requests`. Details in `tools/MRC-GUIDE.md`; `tools/plot_mrc.py` does this.
 
 - **Each dump is now prefixed with a summary line** so the prediction and the observation can
   be checked against each other without correlating separate log lines:
