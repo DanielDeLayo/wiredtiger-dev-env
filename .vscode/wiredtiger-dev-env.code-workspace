@@ -15,6 +15,9 @@
 		{
 			"name": "Increment-and-Freeze",
 			"path": "../../Increment-and-Freeze"
+		},
+		{
+			"path": "../../cache"
 		}
 	],
 	"settings": {
